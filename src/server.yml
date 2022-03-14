@@ -1,0 +1,17 @@
+name: ConstDB
+author: tancehao. <tancehao93@163.com>
+about: ConstDB is a redis-like in-memory database, which supports conflict-free replicated datatypes(CRDT).
+args:
+  - config:
+      value_name: FILE
+      help: Sets a custom config file
+  - ip:
+      short: h
+      long: host
+      help: ip address to bind on.
+      takes_value: true
+  - port:
+      short: p
+      long: port
+      help: port to bind on.
+      takes_value: true
