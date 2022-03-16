@@ -170,6 +170,8 @@ pub enum CstError {
     ReplicateCommandsLost(String),
     #[fail(display = "replica nodeid already exist")]
     ReplicaNodeAlreadyExist,
+    #[fail(display = "invalid checksum of snapshot")]
+    InvalidSnapshotChecksum,
 }
 
 impl From<Error> for CstError {
