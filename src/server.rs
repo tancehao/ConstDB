@@ -96,7 +96,7 @@ impl Server {
         let addr = format!("{}:{}", c.ip, c.port).parse::<SocketAddr>().unwrap();
         let socket = TcpSocket::new_v4()?;
         socket.set_reuseaddr(true)?;
-        socket.set_reuseport(true)?;
+        socket.set_reuseport(false)?;
         socket.bind(addr)?;
         let listener = socket.listen(c.tcp_backlog)?;
         let server_c = server.clone();
