@@ -7,11 +7,13 @@ pub extern crate colour;
 #[macro_use]
 extern crate failure;
 #[macro_use]
-pub extern crate  lazy_static;
+pub extern crate lazy_static;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde;
+extern crate tokio;
 
 use std::fs::OpenOptions;
 use std::io::Error;
@@ -19,46 +21,51 @@ use std::io::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use bitflags::_core::hash::{Hash, Hasher};
+use log::LevelFilter;
 use log4rs::append::console::ConsoleAppender;
-use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
 use log4rs::append::rolling_file::policy::compound::roll::delete::DeleteRoller;
 use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
+use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
 use log4rs::append::rolling_file::RollingFileAppender;
-use log4rs::Config;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
-use log::LevelFilter;
+use log4rs::Config;
 use nix::unistd::{fork, ForkResult};
+use std::hash::{Hash, Hasher};
 
 use crate::conf::GLOBAL_CONF;
+use crate::link::SharedLink;
 use crate::server::Server;
-use failure::_core::alloc::{GlobalAlloc, Layout};
-use crate::stats::{mem_allocated, mem_released};
+use crate::stats::{mem_allocated, mem_released, start_local_metric_collector};
+use std::alloc::{GlobalAlloc, Layout};
+use std::cell::RefCell;
+use std::rc::Rc;
+use tokio::sync::mpsc::Sender;
 
 #[macro_use]
 pub mod resp;
 #[macro_use]
 pub mod link;
 
-pub mod server;
-pub mod object;
-pub mod cmd;
-pub mod conf;
+mod cmd;
+mod conf;
 pub mod conn;
-pub mod snapshot;
-pub mod db;
-pub mod type_set;
-pub mod type_hash;
-pub mod type_counter;
-pub mod replica;
-pub mod stats;
-pub mod crdt;
+mod crdt;
+mod db;
+mod object;
+mod repl_backlog;
+mod replica;
+mod server;
+mod snapshot;
+mod stats;
+mod type_counter;
+mod type_hash;
+mod type_list;
+mod type_set;
 
 pub mod lib {
     pub mod utils;
 }
-
 
 #[global_allocator]
 static ALLOCATOR: CAlloc = CAlloc(jemallocator::Jemalloc);
@@ -81,19 +88,26 @@ pub fn run_server() {
     let config = &GLOBAL_CONF;
     if config.work_dir != "" {
         if let Err(e) = std::env::set_current_dir(&config.work_dir) {
-            println!("unable to set current dir to {} because {}", config.work_dir, e);
+            println!(
+                "unable to set current dir to {} because {}",
+                config.work_dir, e
+            );
             return;
         }
     }
-    println!("daemon: {}", config.daemon);
     if config.daemon {
-        match unsafe{fork()} {
+        match unsafe { fork() } {
             Err(e) => {
                 error!("unable to fork a child process because {}", e);
                 return;
             }
-            Ok(ForkResult::Parent {child: pid}) => {
-                match OpenOptions::new().create(true).write(true).truncate(true).open("pid") {
+            Ok(ForkResult::Parent { child: pid }) => {
+                match OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open("pid")
+                {
                     Ok(mut f) => {
                         if let Err(_) = f.write(format!("{}", pid).as_bytes()) {
                             error!("unable to write pid file");
@@ -105,11 +119,20 @@ pub fn run_server() {
                         return;
                     }
                 }
-            },
+            }
             Ok(ForkResult::Child) => {}
         }
     }
     let pe = Box::new(PatternEncoder::new("{d} {l} {f}:{L} - {m}{n}"));
+    let log_level = match config.log_level.as_str() {
+        "DEBUG" => LevelFilter::Debug,
+        "INFO" => LevelFilter::Info,
+        "WARN" => LevelFilter::Warn,
+        "TRACE" => LevelFilter::Trace,
+        "OFF" => LevelFilter::Off,
+        "ERROR" => LevelFilter::Error,
+        _ => unreachable!(),
+    };
     if config.log != "" {
         let policy = CompoundPolicy::new(
             Box::new(SizeTrigger::new(10737418240)),
@@ -121,7 +144,7 @@ pub fn run_server() {
             .unwrap();
         let config = Config::builder()
             .appender(Appender::builder().build("log", Box::new(logfile)))
-            .build(Root::builder().appender("log").build(LevelFilter::Debug))
+            .build(Root::builder().appender("log").build(log_level))
             .unwrap();
         let _handle = log4rs::init_config(config).unwrap();
     } else {
@@ -130,16 +153,55 @@ pub fn run_server() {
                 "stdout",
                 Box::new(ConsoleAppender::builder().encoder(pe).build()),
             ))
-            .build(Root::builder().appender("stdout").build(LevelFilter::Debug))
+            .build(Root::builder().appender("stdout").build(log_level))
             .unwrap();
         let _handle = log4rs::init_config(config).unwrap();
     }
-
-    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(GLOBAL_CONF.threads).enable_all().build().unwrap();
-    let ls = tokio::task::LocalSet::new();
-    ls.block_on(&rt, async move {
-        Server::run(config).await.unwrap();
+    let mut handles = vec![];
+    let mut client_chans: Vec<Sender<SharedLink>> = vec![];
+    (0..GLOBAL_CONF.threads).for_each(|i| {
+        let (client_tx, mut client_rx) = tokio::sync::mpsc::channel(1024);
+        client_chans.push(client_tx);
+        let handle = std::thread::Builder::new()
+            .name(format!("constdb-io-worker-{}", i))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let ls = tokio::task::LocalSet::new();
+                ls.block_on(&rt, async move {
+                    start_local_metric_collector();
+                    while let Some(mut client) = client_rx.recv().await {
+                        tokio::task::spawn_local(async move {
+                            client.prepare().await;
+                        });
+                    }
+                });
+            })
+            .unwrap();
+        handles.push(handle);
     });
+
+    let handle = std::thread::Builder::new()
+        .name("constdb-main".to_string())
+        .spawn(move || {
+            let server = Rc::new(RefCell::new(Server::new(config)));
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let ls = tokio::task::LocalSet::new();
+            ls.block_on(&rt, async move {
+                start_local_metric_collector();
+                Server::run(server, client_chans).await.unwrap();
+            });
+        })
+        .unwrap();
+    handles.push(handle);
+    for h in handles {
+        h.join().unwrap();
+    }
 }
 
 #[derive(Fail, Debug)]
@@ -236,7 +298,7 @@ impl From<Bytes> for String {
         let bs = b.0.deref().clone();
         match String::from_utf8(bs.clone()) {
             Ok(s) => s,
-            Err(_) => format!("0X{}", base16::encode_lower(&bs))
+            Err(_) => format!("0X{}", base16::encode_lower(&bs)),
         }
     }
 }

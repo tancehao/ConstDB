@@ -1,16 +1,22 @@
-use bitflags::_core::cmp::max;
-use bitflags::_core::option::Option::Some;
+use std::cmp::max;
+use std::option::Option::Some;
 use tokio::macros::support::thread_rng_n;
 
-use crate::{Bytes, CstError};
 use crate::cmd::NextArg;
-use crate::link::Client;
 use crate::crdt::lwwhash::Set;
+use crate::link::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
+use crate::{Bytes, CstError};
 
-pub fn sadd_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn sadd_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let members = {
@@ -41,7 +47,13 @@ pub fn sadd_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     Ok(Message::Integer(cnt as i64))
 }
 
-pub fn srem_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn srem_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let members = {
@@ -66,14 +78,23 @@ pub fn srem_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     Ok(Message::Integer(cnt as i64))
 }
 
-pub fn smembers_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn smembers_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
         None => Message::Nil,
         Some(o) => {
             let s = o.enc.as_set()?;
-            let members: Vec<Message> = s.iter().map(|(d, _)| Message::BulkString(d.clone())).collect();
+            let members: Vec<Message> = s
+                .iter()
+                .map(|(d, _)| Message::BulkString(d.clone()))
+                .collect();
             Message::Array(members)
         }
     };
@@ -81,7 +102,13 @@ pub fn smembers_command(server: &mut Server, _client: Option<&mut Client>, _node
 }
 
 // TODO
-pub fn spop_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn spop_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
 
@@ -109,12 +136,18 @@ pub fn spop_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
             o.updated_at(uuid);
             Ok(Message::BulkString(member))
         }
-        None => Ok(Message::Nil)
+        None => Ok(Message::Nil),
     }
 }
 
 // delset command can only be sent by our replicas
-pub fn delset_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn delset_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Set::empty()), uuid, 0).into());

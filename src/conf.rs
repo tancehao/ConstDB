@@ -2,7 +2,7 @@ use std::env::current_dir;
 
 use clap::App;
 
-lazy_static!{
+lazy_static! {
     pub static ref GLOBAL_CONF: Config = parse_args();
     pub static ref CONF_PATH: String = get_conf_path();
 }
@@ -19,8 +19,23 @@ pub struct Config {
     pub log: String,
     pub work_dir: String,
     pub tcp_backlog: u32,
+    pub repl_backlog_limit: u64,
     pub replica_heartbeat_frequency: u32,
     pub replica_gossip_frequency: u32,
+    pub log_level: String,
+    pub max_exec_per_round: u32,
+    pub hz: u16,
+}
+
+impl Config {
+    fn validate(&self) -> Result<(), String> {
+        match self.log_level.as_str() {
+            "OFF" | "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" => {},
+            _ => return Err("log_level should be one of \"OFF\", \"TRACE\", \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"".to_string())
+        }
+        // TODO
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -34,8 +49,12 @@ struct OriginConfig {
     work_dir: Option<String>,
     threads: Option<usize>,
     tcp_backlog: Option<u32>,
+    repl_backlog_limit: Option<u64>,
     replica_heartbeat_frequency: Option<u32>,
     replica_gossip_frequency: Option<u32>,
+    log_level: Option<String>,
+    max_exec_per_round: Option<u32>,
+    hz: Option<u16>,
 }
 
 fn get_conf_path() -> String {
@@ -49,7 +68,7 @@ fn get_conf_path() -> String {
                 println!("config file is not specified and failed to load the default one because we can't get path of current directory");
                 std::process::exit(-1);
             }
-        }
+        },
     }
 }
 
@@ -65,10 +84,12 @@ fn parse_args() -> Config {
                 std::process::exit(-1);
             }
             Ok(oc) => {
-                let workdir = oc.work_dir.unwrap_or_else(|| current_dir().unwrap().to_str().unwrap().to_string());
+                let workdir = oc
+                    .work_dir
+                    .unwrap_or_else(|| current_dir().unwrap().to_str().unwrap().to_string());
                 let ip = oc.ip.unwrap_or("0.0.0.0".to_string());
                 let port = oc.port.unwrap_or(9001);
-                Config{
+                let c = Config {
                     daemon: oc.daemon.unwrap_or_default(),
                     node_id: oc.node_id,
                     node_alias: oc.node_alias,
@@ -77,12 +98,20 @@ fn parse_args() -> Config {
                     port,
                     work_dir: workdir.clone(),
                     log: oc.log.unwrap_or_default(),
+                    log_level: oc.log_level.unwrap_or("INFO".to_string()).to_uppercase(),
                     tcp_backlog: oc.tcp_backlog.unwrap_or(1024),
-                    replica_heartbeat_frequency: oc.replica_heartbeat_frequency.unwrap_or(4),
+                    replica_heartbeat_frequency: oc.replica_heartbeat_frequency.unwrap_or(40),
                     replica_gossip_frequency: oc.replica_gossip_frequency.unwrap_or(15),
                     threads: oc.threads.unwrap_or(4),
+                    repl_backlog_limit: oc.repl_backlog_limit.unwrap_or(1024 * 1024 * 50),
+                    max_exec_per_round: oc.max_exec_per_round.unwrap_or(16),
+                    hz: oc.hz.unwrap_or(100),
+                };
+                if let Err(e) = c.validate() {
+                    panic!("Invalid config. {}", e);
                 }
-            },
-        }
+                c
+            }
+        },
     }
 }

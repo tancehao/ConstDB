@@ -1,11 +1,12 @@
+use std::cmp::max;
 use std::io::Write;
-use failure::_core::cmp::max;
 
-use crate::{Bytes, CstError};
-use crate::type_counter::Counter;
-use crate::crdt::lwwhash::{Set, Dict};
+use crate::crdt::list::List;
+use crate::crdt::lwwhash::{Dict, Set};
 use crate::resp::Message;
 use crate::snapshot::{SnapshotLoader, SnapshotWriter};
+use crate::type_counter::Counter;
+use crate::{Bytes, CstError};
 use tokio::io::AsyncRead;
 
 #[derive(Debug, Clone)]
@@ -17,13 +18,14 @@ pub struct Object {
 }
 
 const OBJECT_ENC_COUNTER: u8 = 0;
-const OBJECT_ENC_BYTES: u8 = 3;
-const OBJECT_ENC_DICT: u8 = 4;
-const OBJECT_ENC_SET: u8 = 5;
+const OBJECT_ENC_BYTES: u8 = 1;
+const OBJECT_ENC_DICT: u8 = 2;
+const OBJECT_ENC_SET: u8 = 3;
+const OBJECT_ENC_LIST: u8 = 4;
 
 impl Object {
     pub fn new(enc: Encoding, ct: u64, dt: u64) -> Self {
-        Object{
+        Object {
             create_time: ct,
             update_time: 0,
             delete_time: dt,
@@ -33,23 +35,19 @@ impl Object {
 
     #[inline]
     pub fn updated_at(&mut self, uuid: u64) {
-        if self.update_time < uuid {
-            self.update_time = uuid;
-        }
-        if self.create_time < self.delete_time {
-            if uuid < self.create_time {
+        self.update_time = max(self.update_time, uuid);
+    }
 
-            } else if self.create_time <= uuid && uuid < self.delete_time {
-
-            } else {  // uuid >= self.delete_time
-                self.create_time = uuid; // created again
-            }
-        }
+    pub fn delete_at(&mut self, uuid: u64) -> bool {
+        let alive_before = self.alive();
+        self.delete_time = max(self.delete_time, uuid);
+        let alive_after = self.alive();
+        alive_before && !alive_after
     }
 
     #[inline]
     pub fn alive(&self) -> bool {
-        self.create_time >= self.delete_time
+        self.update_time >= self.delete_time
     }
 
     #[inline]
@@ -77,7 +75,7 @@ impl Object {
             }
             (Encoding::LWWDict(d), Encoding::LWWDict(od)) => d.merge(*od),
             (Encoding::LWWSet(s), Encoding::LWWSet(os)) => s.merge(*os),
-            _ => return Err(())
+            _ => return Err(()),
         }
         Ok(())
     }
@@ -104,11 +102,21 @@ impl Object {
                 w.write_byte(OBJECT_ENC_DICT)?;
                 d.save_snapshot(w)
             }
+            Encoding::List(l) => {
+                w.write_byte(OBJECT_ENC_LIST)?;
+                l.save_snapshot(w)
+            }
         }
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(r: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
-        let (ct, mt, dt) = (r.read_integer().await? as u64, r.read_integer().await? as u64, r.read_integer().await? as u64);
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        r: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
+        let (ct, mt, dt) = (
+            r.read_integer().await? as u64,
+            r.read_integer().await? as u64,
+            r.read_integer().await? as u64,
+        );
         let enc = match r.read_byte().await? {
             OBJECT_ENC_COUNTER => Encoding::from(Counter::load_snapshot(r).await?),
             OBJECT_ENC_BYTES => {
@@ -118,13 +126,14 @@ impl Object {
             }
             OBJECT_ENC_SET => Encoding::from(Set::load_snapshot(r).await?),
             OBJECT_ENC_DICT => Encoding::from(Dict::load_snapshot(r).await?),
+            OBJECT_ENC_LIST => Encoding::from(List::empty()),
             _ => return Err(CstError::InvalidType),
         };
-        Ok(Object{
+        Ok(Object {
             create_time: ct,
             update_time: mt,
             delete_time: dt,
-            enc
+            enc,
         })
     }
 
@@ -134,13 +143,14 @@ impl Object {
             Encoding::Bytes(s) => ("bytes", Message::String(s.clone())),
             Encoding::LWWSet(t) => ("lwwset", t.describe()),
             Encoding::LWWDict(t) => ("lwwdict", t.describe()),
+            Encoding::List(l) => ("list", l.describe()),
         };
         Message::Array(vec![
             Message::BulkString(format!("ct: {}", self.create_time).into()),
             Message::BulkString(format!("mt: {}", self.update_time).into()),
             Message::BulkString(format!("dt: {}", self.delete_time).into()),
             Message::BulkString(t.into()),
-            m
+            m,
         ])
     }
 }
@@ -150,7 +160,8 @@ pub enum Encoding {
     Counter(Box<Counter>),
     Bytes(Bytes),
     LWWSet(Box<Set>),
-    LWWDict(Box<Dict>)
+    LWWDict(Box<Dict>),
+    List(Box<List>),
 }
 
 impl Encoding {
@@ -160,6 +171,7 @@ impl Encoding {
             Encoding::Bytes(_) => "Bytes",
             Encoding::LWWDict(_) => "LWWDict",
             Encoding::LWWSet(_) => "LWWSet",
+            Encoding::List(_) => "List",
         }
     }
 
@@ -204,6 +216,20 @@ impl Encoding {
             _ => Err(CstError::InvalidType),
         }
     }
+
+    pub fn as_list(&self) -> Result<&List, CstError> {
+        match self {
+            Encoding::List(c) => Ok(c),
+            _ => Err(CstError::InvalidType),
+        }
+    }
+
+    pub fn as_mut_list(&mut self) -> Result<&mut List, CstError> {
+        match self {
+            Encoding::List(c) => Ok(c),
+            _ => Err(CstError::InvalidType),
+        }
+    }
 }
 
 impl From<Counter> for Encoding {
@@ -227,5 +253,11 @@ impl From<Set> for Encoding {
 impl From<Dict> for Encoding {
     fn from(c: Dict) -> Self {
         Encoding::LWWDict(Box::new(c))
+    }
+}
+
+impl From<List> for Encoding {
+    fn from(l: List) -> Self {
+        Encoding::List(Box::new(l))
     }
 }

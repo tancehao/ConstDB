@@ -1,17 +1,17 @@
-use crate::crdt::lwwhash::LWWHash;
-use crate::resp::Message;
-use std::io::Write;
-use crate::snapshot::{SnapshotWriter, SNAPSHOT_FLAG_REPLICA_ADD, SNAPSHOT_FLAG_REPLICA_REM};
-use std::collections::HashMap;
+use crate::cmd::NextArg;
 use crate::conn::Conn;
-use crate::server::{EventsConsumer, Server};
-use crate::replica::pull::{Puller, PullStat};
+use crate::crdt::lwwhash::LWWHash;
 use crate::link::{Link, LinkType};
+use crate::replica::pull::{PullStat, Puller};
+use crate::replica::push::{PushStat, Pusher};
+use crate::resp::Message;
+use crate::server::{EventsConsumer, Server};
+use crate::snapshot::{SnapshotWriter, SNAPSHOT_FLAG_REPLICA_ADD, SNAPSHOT_FLAG_REPLICA_REM};
 use crate::CstError;
+use std::collections::HashMap;
+use std::io::Write;
 use tokio::net::TcpSocket;
 use tokio::time::{sleep, Duration};
-use crate::cmd::NextArg;
-use crate::replica::push::{Pusher, PushStat};
 
 pub struct ReplicaManager {
     myself: ReplicaIdentity,
@@ -27,6 +27,7 @@ impl ReplicaManager {
     }
 
     pub fn add_replica(&mut self, addr: String, meta: ReplicaMeta, t: u64) -> bool {
+        debug!("Adding a replica, addr={}", addr);
         self.replicas.set(addr, meta, t)
     }
 
@@ -34,9 +35,14 @@ impl ReplicaManager {
         self.replicas.rem(addr, t)
     }
 
-    pub fn update_replica_pull_stat(&mut self, id: &ReplicaIdentity, uuid_he_sent: u64, uuid_he_acked: u64) {
+    pub fn update_replica_pull_stat(
+        &mut self,
+        id: &ReplicaIdentity,
+        uuid_he_sent: u64,
+        uuid_he_acked: u64,
+    ) {
         match self.replicas.get_mut(&id.addr) {
-            None => {},
+            None => {}
             Some(o) => {
                 o.uuid_he_sent = uuid_he_sent;
                 o.uuid_he_acked = uuid_he_acked;
@@ -44,9 +50,14 @@ impl ReplicaManager {
         }
     }
 
-    pub fn update_replica_push_stat(&mut self, id: &ReplicaIdentity, uuid_i_sent: u64, uuid_i_acked: u64) {
+    pub fn update_replica_push_stat(
+        &mut self,
+        id: &ReplicaIdentity,
+        uuid_i_sent: u64,
+        uuid_i_acked: u64,
+    ) {
         match self.replicas.get_mut(&id.addr) {
-            None => {},
+            None => {}
             Some(o) => {
                 o.uuid_i_sent = uuid_i_sent;
                 o.uuid_i_acked = uuid_i_acked;
@@ -85,7 +96,11 @@ impl ReplicaManager {
     }
 
     pub fn min_uuid(&self) -> Option<u64> {
-        self.replicas.add.iter().map(|(_, (_, id))| id.uuid_he_sent).min()
+        self.replicas
+            .add
+            .iter()
+            .map(|(_, (_, id))| id.uuid_he_sent)
+            .min()
     }
 
     #[inline]
@@ -147,17 +162,17 @@ pub struct ReplicaMeta {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ReplicaIdentity{
+pub struct ReplicaIdentity {
     pub id: u64,
     pub addr: String,
     pub alias: String,
 }
 #[derive(Debug)]
-pub struct Replica{
+pub struct Replica {
     pub meta: ReplicaMeta,
     pub conn: Conn,
     pub(crate) stat: ReplicaStat,
-    pub(crate) events: Option<EventsConsumer>,
+    pub(crate) events: Option<EventsConsumer<u64>>,
     to_serve: bool,
     to_close: bool,
 }
@@ -190,16 +205,23 @@ impl Link for Replica {
 
     async fn prepare(&mut self) {
         if let Err(e) = self.interact_independently().await {
-            error!("Failed to interact with replica at {}, err={}", self.meta.he.addr, e);
+            error!(
+                "Failed to interact with replica at {}, err={}",
+                self.meta.he.addr, e
+            );
             self.stat = ReplicaStat::NotConnected;
         }
     }
 
     #[inline]
-    fn to_serve(&self) -> bool { self.to_serve }
+    fn to_serve(&self) -> bool {
+        self.to_serve
+    }
 
     #[inline]
-    fn to_close(&self) -> bool { self.to_close }
+    fn to_close(&self) -> bool {
+        self.to_close
+    }
 
     async fn close(&mut self) -> Result<(), CstError> {
         Ok(())
@@ -208,10 +230,18 @@ impl Link for Replica {
 
 impl Replica {
     pub fn new(his_addr: String, my_id: u64, my_alias: String, my_addr: String) -> Self {
-        Self{
-            meta: ReplicaMeta{
-                myself: ReplicaIdentity{id: my_id, alias: my_alias, addr: my_addr},
-                he: ReplicaIdentity{id: 0, alias: "".to_string(), addr: his_addr.clone()},
+        Self {
+            meta: ReplicaMeta {
+                myself: ReplicaIdentity {
+                    id: my_id,
+                    alias: my_alias,
+                    addr: my_addr,
+                },
+                he: ReplicaIdentity {
+                    id: 0,
+                    alias: "".to_string(),
+                    addr: his_addr.clone(),
+                },
                 uuid_i_sent: 0,
                 uuid_he_acked: 0,
                 uuid_he_sent: 0,
@@ -233,8 +263,13 @@ impl Replica {
         match &mut self.stat {
             ReplicaStat::Alive(puller, pusher) => {
                 if server.replicas.replica_forgotten(&self.meta.he.addr) {
-                    info!("The replica at {} is forgotten from the cluster", self.meta.he.addr);
-                    pusher.writer.write_msg(Message::Error("Stop replication because you're removed from the cluster".into()));
+                    info!(
+                        "The replica at {} is forgotten from the cluster",
+                        self.meta.he.addr
+                    );
+                    pusher.writer.write_msg(Message::Error(
+                        "Stop replication because you're removed from the cluster".into(),
+                    ));
                     self.to_close = true;
                 } else {
                     puller.merge_replicates_in_main(server)?;
@@ -245,15 +280,20 @@ impl Replica {
         }
         Ok(())
     }
-    
 
     pub async fn interact_independently(&mut self) -> Result<(), CstError> {
         self.to_serve = false;
         loop {
             match &mut self.stat {
                 ReplicaStat::NotConnected => {
-                    debug!("The replica at {} is in NotConnected stat", self.meta.he.addr);
-                    let _ = std::mem::replace(&mut self.conn, Conn::new(None, self.meta.he.addr.clone()));
+                    debug!(
+                        "The replica at {} is in NotConnected stat",
+                        self.meta.he.addr
+                    );
+                    let _ = std::mem::replace(
+                        &mut self.conn,
+                        Conn::new(None, self.meta.he.addr.clone()),
+                    );
                     let socket = TcpSocket::new_v4()?;
                     socket.set_reuseaddr(true)?;
                     socket.set_reuseport(true)?;
@@ -266,14 +306,25 @@ impl Replica {
                         }
                         Ok(c) => {
                             info!("Connected to replica at {}", self.meta.he.addr);
-                            self.stat = ReplicaStat::Handshake(Conn::new(Some(c), self.meta.he.addr.clone()), false);
+                            self.stat = ReplicaStat::Handshake(
+                                Conn::new(Some(c), self.meta.he.addr.clone()),
+                                false,
+                            );
                         }
                     }
                 }
                 ReplicaStat::Handshake(conn, passive) => {
                     debug!("Replica at {} is in Handshake stat", self.meta.he.addr);
-                    if !*passive { // send the sync command and wait for his response
-                        conn.send_msg(mkcmd!("SYNC", 0, self.meta.myself.id, self.meta.myself.alias, self.meta.uuid_he_sent)).await?;
+                    if !*passive {
+                        // send the sync command and wait for his response
+                        conn.send_msg(mkcmd!(
+                            "SYNC",
+                            0,
+                            self.meta.myself.id,
+                            self.meta.myself.alias,
+                            self.meta.uuid_he_sent
+                        ))
+                        .await?;
                         let mut args = match conn.next_msg().await? {
                             Message::Array(args) => args.into_iter(),
                             others => {
@@ -283,26 +334,35 @@ impl Replica {
                         };
                         let _ = args.next_string()?; // SYNC
                         let _ = args.next_u64()?; // 1
-                        let (his_id, his_alias, uuid_i_sent) = (args.next_u64()?, args.next_string()?, args.next_u64()?);
+                        let (his_id, his_alias, uuid_i_sent) =
+                            (args.next_u64()?, args.next_string()?, args.next_u64()?);
                         self.meta.he.id = his_id;
                         self.meta.he.alias = his_alias;
                         self.meta.uuid_i_sent = uuid_i_sent;
-                    } else {  // we've already received his sync command, send our response and start to exchange dataset.
+                    } else {
+                        // we've already received his sync command, send our response and start to exchange dataset.
                         let meta = &self.meta;
-                        conn.send_msg(mkcmd!("SYNC", 1, meta.myself.id, meta.myself.alias, meta.uuid_he_sent)).await?;
+                        conn.send_msg(mkcmd!(
+                            "SYNC",
+                            1,
+                            meta.myself.id,
+                            meta.myself.alias,
+                            meta.uuid_he_sent
+                        ))
+                        .await?;
                     }
                     let (reader, writer) = conn.split();
-                    let puller = Puller{
+                    let puller = Puller {
                         uuid_he_sent: self.meta.uuid_he_sent,
                         uuid_he_acked: self.meta.uuid_he_acked,
                         meta: self.meta.clone(),
                         stats: PullStat::SyncSent,
                         reader,
                         snapshot_entries: Default::default(),
-                        replicates: Default::default()
+                        replicates: Default::default(),
                     };
                     let events = self.events.take().ok_or(CstError::SystemError)?;
-                    let pusher = Pusher{
+                    let pusher = Pusher {
                         uuid_i_sent: self.meta.uuid_i_sent,
                         uuid_i_acked: self.meta.uuid_i_acked,
                         latest_ack_time: 0,
@@ -319,7 +379,7 @@ impl Replica {
                         PushStat::SyncReceived => {
                             self.to_serve = true;
                             return Ok(());
-                        },
+                        }
                         _ => {}
                     }
                     let (mut pull_result, mut push_result) = (Ok(()), Ok(()));
@@ -331,29 +391,32 @@ impl Replica {
                             }
                         }
                         _ => {
-                            let (r, t) = tokio::join!(
-                                puller.download_snapshot(),
-                                pusher.sending_snapshot()
-                            );
+                            let (r, t) =
+                                tokio::join!(puller.download_snapshot(), pusher.sending_snapshot());
                             pull_result = r;
                             push_result = t;
                         }
                     }
                     if let Err(e) = pull_result {
-                        error!("Error occured when pulling data from the replica at {}, err={}", self.meta.he.addr, e);
+                        error!(
+                            "Error occured when pulling data from the replica at {}, err={}",
+                            self.meta.he.addr, e
+                        );
                         self.meta.close = true;
                         return Err(CstError::SystemError);
                     }
                     if let Err(e) = push_result {
-                        error!("Error occured when pushing data to the replica at {}, err={}", self.meta.he.addr, e);
+                        error!(
+                            "Error occured when pushing data to the replica at {}, err={}",
+                            self.meta.he.addr, e
+                        );
                         self.meta.close = true;
                         return Err(CstError::SystemError);
                     }
                     self.to_serve = true;
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }
-
     }
 }

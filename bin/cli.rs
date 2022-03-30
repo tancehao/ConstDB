@@ -6,16 +6,21 @@ use clap::{App, Arg};
 use tokio::net::TcpStream;
 
 use constdb::conn::Conn;
-use constdb::CstError;
 use constdb::resp::Message;
+use constdb::CstError;
 
 pub fn main() {
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let local_set = tokio::task::LocalSet::new();
     local_set.block_on(&rt, async move {
         let addr = parse_args();
         loop {
-            let conn = TcpStream::connect(addr.clone()).await.expect("cannot connect to server");
+            let conn = TcpStream::connect(addr.clone())
+                .await
+                .expect("cannot connect to server");
             let server_addr = conn.peer_addr().expect("unable to fetch peer_addr");
             let conn = Conn::new(Some(conn), server_addr.to_string());
             if let Err(e) = interact(conn).await {
@@ -42,7 +47,12 @@ async fn interact(mut conn: Conn) -> Result<(), CstError> {
         if cmd.len() == 0 {
             continue;
         }
-        let args: Vec<Message> = cmd.split(' ').into_iter().filter(|&x| x.len() > 0).map(|x| Message::BulkString(x.into())).collect();
+        let args: Vec<Message> = cmd
+            .split(' ')
+            .into_iter()
+            .filter(|&x| x.len() > 0)
+            .map(|x| Message::BulkString(x.into()))
+            .collect();
         match args.first() {
             None => continue,
             Some(Message::BulkString(s)) => {
@@ -68,7 +78,7 @@ async fn interact(mut conn: Conn) -> Result<(), CstError> {
 
 fn format_msg<T: Write>(w: &mut T, msg: &Message) -> Result<(), std::io::Error> {
     match msg {
-        Message::None => {},
+        Message::None => {}
         Message::Nil => writeln!(w, "(nil)")?,
         Message::Array(args) => {
             for arg in args {
@@ -88,14 +98,18 @@ fn parse_args() -> String {
         .version("1.1.0")
         .author("TanCehao tancehao93@163.com")
         .about("in-memory database supporting crdt")
-        .arg(Arg::with_name("host")
-            .short("h")
-            .help("specify the server's host")
-            .takes_value(true))
-        .arg(Arg::with_name("port")
-            .short("p")
-            .help("specify the server's port")
-            .takes_value(true))
+        .arg(
+            Arg::with_name("host")
+                .short("h")
+                .help("specify the server's host")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("port")
+                .short("p")
+                .help("specify the server's port")
+                .takes_value(true),
+        )
         .get_matches();
 
     let ip = matches.value_of("host").unwrap_or("127.0.0.1");

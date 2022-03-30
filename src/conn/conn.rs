@@ -1,10 +1,9 @@
-use tokio::fs::File;
-use tokio::net::TcpStream;
-
 use crate::conn::reader::Reader;
 use crate::conn::writer::Writer;
-use crate::CstError;
 use crate::resp::Message;
+use crate::CstError;
+use tokio::fs::File;
+use tokio::net::TcpStream;
 
 #[derive(Default, Debug)]
 pub struct Conn {
@@ -28,10 +27,10 @@ impl Conn {
                 (Some(rx), Some(tx))
             }
         };
-        Self{
+        Self {
             writer: Writer::new(addr.clone(), pusher),
             reader: Reader::new(addr.clone(), puller),
-            addr
+            addr,
         }
     }
 
@@ -41,8 +40,7 @@ impl Conn {
         std::mem::swap(&mut w, &mut self.writer);
         (r, w)
     }
-    
-    
+
     pub fn from_splitted(r: &mut Reader, w: &mut Writer) -> Self {
         let mut c = Conn::new(None, r.addr.clone());
         std::mem::swap(&mut c.writer, w);
@@ -52,7 +50,10 @@ impl Conn {
 
     pub async fn net_ready(&self) -> Result<(bool, bool), CstError> {
         let (mut readable, mut writable) = (false, false);
-        let (readable_size, writable_size) = (self.reader.io_readable_size(), self.writer.io_writable_size());
+        let (readable_size, writable_size) = (
+            self.reader.io_readable_size(),
+            self.writer.io_writable_size(),
+        );
         tokio::select! {
             r = self.reader.readable(), if readable_size > 0 => {
                 r?;
@@ -137,9 +138,9 @@ impl Conn {
 mod test {
     use tokio::macros::support::thread_rng_n;
 
-    use crate::resp::Message;
     use crate::conn::buf_read::ReadBuf;
     use crate::conn::buf_write::WriteBuf;
+    use crate::resp::Message;
 
     #[test]
     fn test_io_buf() {
@@ -156,7 +157,7 @@ mod test {
                 Message::Error("arg2".into()),
                 Message::Integer(3),
                 Message::Array(vec![Message::BulkString("arg4".into())]),
-            ])
+            ]),
         ];
 
         let bs = vec![
@@ -166,7 +167,7 @@ mod test {
             "$4\r\nBulk\r\n",
             "$-1\r\n",
             "$0\r\n\r\n",
-            "*5\r\n$3\r\nCMD\r\n+arg1\r\n-arg2\r\n:3\r\n*1\r\n$4\r\narg4\r\n"
+            "*5\r\n$3\r\nCMD\r\n+arg1\r\n-arg2\r\n:3\r\n*1\r\n$4\r\narg4\r\n",
         ];
 
         let mut buf = ReadBuf::new("test".to_string());

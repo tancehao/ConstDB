@@ -1,0 +1,38 @@
+# wether this server runs in daemon mode.
+daemon = true
+
+# A unsigned 64-bit integer specifying the id of this server. 
+# It's one of the key points in solving conflicts among replicas.
+# It's the administrator's responsibility to ensure its uniqueness.
+node_id = 1
+
+# An alias of this server.
+node_alias = "node9001"
+
+# The ip address and port this server will listen for.
+ip = "127.0.0.1"
+port = 9001
+
+# Name of the file into which the logs will be written.
+log = "/home/myname/constdb/logs.out"
+
+# Log's level. Valid options are ERROR|INFO|WARN|DEBUG|TRACE|OFF
+log_level = "ERROR"
+
+# The working directory
+work_dir = "/home/myname/constdb"
+
+# Size of the backlog of the tcp listener.
+tcp_backlog = 1024
+
+# Capacity in bytes of the replication backlog.
+repl_backlog_limit = 104857600
+
+# Seconds after which a server should ping all of it's replicas.
+replica_heartbeat_frequency = 4
+
+# Amount of commands of a single client that can be executed without interrupted by other clients.
+max_exec_per_round = 16
+
+# The frequency the server runs its periodic tasks.
+hz = 100

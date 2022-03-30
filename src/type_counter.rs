@@ -2,15 +2,15 @@ use std::collections::hash_map::Iter;
 use std::collections::HashMap;
 use std::io::Write;
 
-use bitflags::_core::cmp::max;
+use std::cmp::max;
 
-use crate::CstError;
 use crate::cmd::NextArg;
 use crate::link::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
 use crate::snapshot::{SnapshotLoader, SnapshotWriter};
+use crate::CstError;
 use tokio::io::AsyncRead;
 
 type VClock<T> = HashMap<u64, T>;
@@ -23,7 +23,7 @@ pub struct Counter {
 
 impl Counter {
     pub fn default() -> Self {
-        Counter{
+        Counter {
             sum: 0,
             data: HashMap::new(),
         }
@@ -40,18 +40,16 @@ impl Counter {
                 self.data.insert(actor, (value, uuid));
                 self.sum += value;
             }
-            Some((v, t)) => {
-                if *t < uuid {
-                    *v += value;
-                    self.sum += value;
-                }
+            Some((v, _)) => {
+                *v += value;
+                self.sum += value;
             }
         }
         self.sum
     }
 
     pub fn iter(&self) -> CounterIter {
-        CounterIter{
+        CounterIter {
             i: self.data.iter(),
         }
     }
@@ -65,7 +63,7 @@ impl Counter {
                     } else if *tt == *t {
                         *v = max(*v, *vv);
                     }
-                },
+                }
                 None => {}
             }
         }
@@ -77,10 +75,10 @@ impl Counter {
                     } else if *tt == *t {
                         *v = max(*v, *vv);
                     }
-                },
+                }
                 None => {
                     self.data.insert(*nodeid, (*vv, *tt));
-                },
+                }
             }
         }
         self.cal_sum();
@@ -91,10 +89,19 @@ impl Counter {
     }
 }
 
-
 impl Counter {
     pub fn describe(&self) -> Message {
-        let data: Vec<Message> = self.data.iter().map(|(k, (v, t))| Message::Array(vec![Message::Integer(*k as i64), Message::Integer(*v), Message::Integer(*t as i64)])).collect();
+        let data: Vec<Message> = self
+            .data
+            .iter()
+            .map(|(k, (v, t))| {
+                Message::Array(vec![
+                    Message::Integer(*k as i64),
+                    Message::Integer(*v),
+                    Message::Integer(*t as i64),
+                ])
+            })
+            .collect();
         Message::Array(data)
     }
 
@@ -108,7 +115,9 @@ impl Counter {
         Ok(())
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(src: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        src: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
         let cnt = src.read_integer().await? as usize;
         let mut data = VClock::with_capacity(cnt);
         let mut total = 0;
@@ -119,7 +128,7 @@ impl Counter {
             data.insert(n, (v, t));
             total += v;
         }
-        Ok(Self{
+        Ok(Self {
             sum: total,
             data: data,
         })
@@ -134,12 +143,19 @@ impl<'a> Iterator for CounterIter<'a> {
     type Item = (u64, (i64, u64));
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.i.next().map(|(nodeid, (value, time))| (*nodeid, (*value, *time)))
+        self.i
+            .next()
+            .map(|(nodeid, (value, time))| (*nodeid, (*value, *time)))
     }
 }
 
-
-pub fn delcnt_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn delcnt_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let o = match server.db.query(&key_name, uuid) {
@@ -150,12 +166,11 @@ pub fn delcnt_command(server: &mut Server, _client: Option<&mut Client>, _nodeid
         }
         Some(o) => o,
     };
+    o.delete_at(uuid);
     match &mut o.enc {
         Encoding::Counter(c) => {
             // let cnt = args.next_i64()?;
             // *i += cnt;
-            o.update_time = max(o.update_time, uuid);
-            o.delete_time = max(o.delete_time, uuid);
             while let Ok(nodeid) = args.next_u64() {
                 let v = args.next_i64()?;
                 c.change(nodeid, v, uuid);
@@ -166,7 +181,13 @@ pub fn delcnt_command(server: &mut Server, _client: Option<&mut Client>, _nodeid
     }
 }
 
-pub fn incr_command(server: &mut Server, _client: Option<&mut Client>, nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn incr_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     //let o = server.db.query_or_insert(key_name, uuid)
@@ -178,15 +199,19 @@ pub fn incr_command(server: &mut Server, _client: Option<&mut Client>, nodeid: u
         }
         Some(o) => o,
     };
-    //let mut db = HashMap::new();
-    //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Counter::default()), uuid, 0).into());
     let c = o.enc.as_mut_counter()?;
     let v = c.change(nodeid, 1, uuid);
     o.updated_at(uuid);
     Ok(Message::Integer(v))
 }
 
-pub fn decr_command(server: &mut Server, _client: Option<&mut Client>, nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn decr_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Counter::default()), uuid, 0).into());

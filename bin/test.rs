@@ -15,19 +15,24 @@ use constdb::resp::Message;
 
 pub fn main() {
     env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info");
-    env_logger::builder().format(|buf, r| {
-        writeln!(
-            buf,
-            "{} {} [{}:{}] {}",
-            Local::now().format("%Y-%m-%d %H:%M:%S.%6f"),
-            r.level(),
-            r.file().unwrap_or("<unnamed>"),
-            r.line().unwrap_or(0),
-            r.args(),
-        )
-    }).init();
+    env_logger::builder()
+        .format(|buf, r| {
+            writeln!(
+                buf,
+                "{} {} [{}:{}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S.%6f"),
+                r.level(),
+                r.file().unwrap_or("<unnamed>"),
+                r.line().unwrap_or(0),
+                r.args(),
+            )
+        })
+        .init();
 
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let local_set = tokio::task::LocalSet::new();
     local_set.block_on(&rt, async move {
         let replicas = parse_args();
@@ -43,23 +48,33 @@ fn parse_args() -> Vec<String> {
         .version("1.1.0")
         .author("TanCehao tancehao93@163.com")
         .about("in-memory database supporting crdt")
-        .arg(Arg::with_name("host")
-            .short("h")
-            .help("specify the server's host")
-            .takes_value(true))
-        .arg(Arg::with_name("port")
-            .short("p")
-            .help("specify the server's port")
-            .takes_value(true))
-        .arg(Arg::with_name("replicas")
-            .short("rs")
-            .long("replicas")
-            .help("the addresses of the replicas to be test, should be of format ip:port")
-            .takes_value(true)
-            .multiple(true))
+        .arg(
+            Arg::with_name("host")
+                .short("h")
+                .help("specify the server's host")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("port")
+                .short("p")
+                .help("specify the server's port")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("replicas")
+                .short("rs")
+                .long("replicas")
+                .help("the addresses of the replicas to be test, should be of format ip:port")
+                .takes_value(true)
+                .multiple(true),
+        )
         .get_matches();
 
-    let nodes: Vec<String> = matches.values_of("replicas").unwrap().map(|x| x.to_string()).collect();
+    let nodes: Vec<String> = matches
+        .values_of("replicas")
+        .unwrap()
+        .map(|x| x.to_string())
+        .collect();
     nodes
 }
 
@@ -102,7 +117,6 @@ async fn test_active_active(nodes: Vec<String>) {
     assert_eq!(exec!(r2, "INCR", "k3"), Message::Integer(2));
     sleep_mil!(20);
     assert_eq!(exec!(r1, "GET", "k3"), Message::Integer(2));
-
     assert_eq!(exec!(r3, "MEET", r2.addr.clone()), Message::Integer(1));
     sleep_mil!(5000);
     assert_eq!(exec!(r3, "GET", "k3"), Message::Integer(2));
@@ -128,7 +142,7 @@ async fn test_counters(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
     let key2 = "counter1";
     let mut clients = vec![&mut *r1, &mut *r2, &mut *r3];
     let mut v = 0;
-    for _  in 0i32..1000 {
+    for _ in 0i32..1000 {
         let rand = thread_rng_n(10);
         let cmd = if rand % 2 == 0 {
             v += 1;
@@ -141,13 +155,16 @@ async fn test_counters(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
         exec!(clients[rand % 3], cmd, key2);
         sleep_mil!(2);
     }
-    sleep_mil!(20);
+    sleep_mil!(200);
     assert_eq!(exec!(r1, "GET", key2), Message::Integer(v));
     assert_eq!(exec!(r2, "GET", key2), Message::Integer(v));
     assert_eq!(exec!(r3, "GET", key2), Message::Integer(v));
 
     println!("{}", green!("INCR AND DECR passed!"));
+    test_counters_with_del(r1, r2, r3).await;
+}
 
+async fn test_counters_with_del(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
     println!("");
     // FIXME
     println!("----------------------------------------------------");
@@ -155,36 +172,27 @@ async fn test_counters(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
     println!("----------------------------------------------------");
     let key3 = "counter2";
     let mut clients = vec![&mut *r1, &mut *r2, &mut *r3];
-    let mut v: Option<i64> = None;
+    let mut cmds = vec![];
     for i in 0i32..100 {
         let rand = thread_rng_n(100);
         let cmd = match rand % 3 {
-            0 => {
-                v = v.or(Some(0)).map(|x| x + 1);
-                "INCR"
-            },
-            1 => {
-                v = v.or(Some(0)).map(|x| x - 1);
-                "DECR"
-            },
-            2 => {
-                v = None;
-                "DEL"
-            },
+            0 => "INCR",
+            1 => "DECR",
+            2 => "DEL",
             _ => unreachable!(),
         };
+        cmds.push(cmd);
         let rand = thread_rng_n(100) as usize;
         exec!(clients[rand % 3], cmd, key3);
         sleep_mil!(1);
         if i % 10 == 0 {
-            sleep_mil!(50);
-            let vv = match v {
-                None => Message::Nil,
-                Some(vvv) => Message::Integer(vvv),
-            };
-            assert_eq!(exec!(clients[0], "GET", key3), vv);
-            assert_eq!(exec!(clients[1], "GET", key3), vv);
-            assert_eq!(exec!(clients[2], "GET", key3), vv);
+            sleep_mil!(200);
+            let res1 = exec!(clients[0], "GET", key3);
+            let res2 = exec!(clients[1], "GET", key3);
+            let res3 = exec!(clients[2], "GET", key3);
+            println!("res1: {}, res2: {}, res3: {}", res1, res2, res3);
+            assert_eq!(res1, res2);
+            assert_eq!(res1, res3);
         }
     }
     println!("{}", green!("INCR, DECR and DEL passed"));
@@ -195,26 +203,29 @@ async fn test_bytes(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
     println!("----------------------------------------------------");
     println!("test SET, DEL concurrently");
     println!("----------------------------------------------------");
-    let mut d = HashMap::new();
+    let mut d = HashSet::new();
     let mut clients = vec![&mut *r1, &mut *r2, &mut *r3];
     for _ in 0i32..1000 {
         let rand = thread_rng_n(100);
-        let key = format!("key:{}", rand%5);
+        let key = format!("key:{}", rand % 5);
         let rand_c = thread_rng_n(100) as usize;
         if rand % 3 == 0 {
             d.remove(&key);
             exec!(clients[rand_c % 3], "DEL", key);
         } else {
             let value = format!("value:{}", thread_rng_n(1000));
-            d.insert(key.clone(), value.clone());
+            d.insert(key.clone());
             exec!(clients[rand_c % 3], "SET", key, value);
         };
     }
     sleep_mil!(500);
-    for c in clients {
-        for (k, v) in d.iter() {
-            assert_eq!(exec!(c, "GET", k.clone()), Message::BulkString(v.clone().into()));
-        }
+
+    for key in d.iter() {
+        let res1 = exec!(clients[0], "GET", key.clone());
+        let res2 = exec!(clients[1], "GET", key.clone());
+        let res3 = exec!(clients[2], "GET", key.clone());
+        assert_eq!(res1, res2);
+        assert_eq!(res1, res3);
     }
     println!("{}", green!("SET and DEL passed!"));
 }
@@ -242,16 +253,20 @@ async fn test_set(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
         sleep_mil!(1);
     }
     sleep_mil!(200);
-    let mut local_members: Vec<String> = s.into_iter().map(|x| format!("{}", Message::BulkString(x.into()))).collect();
+    let mut local_members: Vec<String> = s
+        .into_iter()
+        .map(|x| format!("{}", Message::BulkString(x.into())))
+        .collect();
     local_members.sort();
     for c in clients {
         match exec!(c, "smembers", key) {
             Message::Array(members) => {
-                let mut members: Vec<String> = members.into_iter().map(|x| format!("{}", x)).collect();
+                let mut members: Vec<String> =
+                    members.into_iter().map(|x| format!("{}", x)).collect();
                 members.sort();
                 assert_eq!(members, local_members);
             }
-            _ => panic!("should be array")
+            _ => panic!("should be array"),
         }
     }
 
@@ -287,16 +302,21 @@ async fn test_set(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
         sleep_mil!(1);
         if i % 20 == 0 {
             sleep_mil!(50);
-            let mut local_members: Vec<String> = s.clone().into_iter().map(|x| format!("{}", Message::BulkString(x.into()))).collect();
+            let mut local_members: Vec<String> = s
+                .clone()
+                .into_iter()
+                .map(|x| format!("{}", Message::BulkString(x.into())))
+                .collect();
             local_members.sort();
             for c in clients.iter_mut() {
                 match exec!(*c, "smembers", key) {
                     Message::Array(members) => {
-                        let mut members: Vec<String> = members.into_iter().map(|x| format!("{}", x)).collect();
+                        let mut members: Vec<String> =
+                            members.into_iter().map(|x| format!("{}", x)).collect();
                         members.sort();
                         assert_eq!(members, local_members);
                     }
-                    _ => panic!("should be array")
+                    _ => panic!("should be array"),
                 }
             }
         }
@@ -323,7 +343,7 @@ async fn test_dict(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
             1 | 2 | 3 | 4 => {
                 d.insert(field.clone(), value.clone());
                 exec!(clients[rand_c % 3], "HSET", key, field, value);
-            },
+            }
             0 => {
                 d.remove(field.as_str());
                 exec!(clients[rand_c % 3], "HDEL", key, field);
@@ -333,17 +353,28 @@ async fn test_dict(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
         sleep_mil!(1);
     }
     sleep_mil!(200);
-    let mut local_members: Vec<String> = d.into_iter()
-        .map(|(k, v)| format!("{}", Message::Array(vec![Message::BulkString(k.into()), Message::BulkString(v.into())]))).collect();
+    let mut local_members: Vec<String> = d
+        .into_iter()
+        .map(|(k, v)| {
+            format!(
+                "{}",
+                Message::Array(vec![
+                    Message::BulkString(k.into()),
+                    Message::BulkString(v.into())
+                ])
+            )
+        })
+        .collect();
     local_members.sort();
     for c in clients {
         match exec!(c, "HGETALL", key) {
             Message::Array(members) => {
-                let mut members: Vec<String> = members.into_iter().map(|x| format!("{}", x)).collect();
+                let mut members: Vec<String> =
+                    members.into_iter().map(|x| format!("{}", x)).collect();
                 members.sort();
                 assert_eq!(members, local_members);
             }
-            _ => panic!("should be array")
+            _ => panic!("should be array"),
         }
     }
     println!("{}", green!("HSET AND HDEL passed!"));
@@ -365,7 +396,7 @@ async fn test_dict(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
             0 | 1 | 2 | 3 => {
                 m.insert(field.clone(), value.clone());
                 exec!(clients[rand_c % 3], "HSET", key, field, value);
-            },
+            }
             4 | 5 | 6 | 7 => {
                 m.remove(field.as_str());
                 exec!(clients[rand_c % 3], "HDEL", key, field);
@@ -379,17 +410,29 @@ async fn test_dict(r1: &mut Conn, r2: &mut Conn, r3: &mut Conn) {
         sleep_mil!(1);
         if i % 20 == 0 {
             sleep_mil!(50);
-            let mut local_members: Vec<String> = m.clone().into_iter()
-                .map(|(k, v)| format!("{}", Message::Array(vec![Message::BulkString(k.into()), Message::BulkString(v.into())]))).collect();
+            let mut local_members: Vec<String> = m
+                .clone()
+                .into_iter()
+                .map(|(k, v)| {
+                    format!(
+                        "{}",
+                        Message::Array(vec![
+                            Message::BulkString(k.into()),
+                            Message::BulkString(v.into())
+                        ])
+                    )
+                })
+                .collect();
             local_members.sort();
             for c in clients.iter_mut() {
                 match exec!(c, "HGETALL", key) {
                     Message::Array(members) => {
-                        let mut members: Vec<String> = members.into_iter().map(|x| format!("{}", x)).collect();
+                        let mut members: Vec<String> =
+                            members.into_iter().map(|x| format!("{}", x)).collect();
                         members.sort();
                         assert_eq!(members, local_members);
                     }
-                    _ => panic!("should be array")
+                    _ => panic!("should be array"),
                 }
             }
         }
@@ -417,7 +460,7 @@ async fn send_and_receive(c: &mut Conn, cmd: Message) -> Message {
     }
     match c.next_msg().await {
         Err(e) => panic!("{}", e),
-        Ok(msg) => msg
+        Ok(msg) => msg,
     }
 }
 

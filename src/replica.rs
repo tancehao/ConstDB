@@ -1,39 +1,50 @@
-pub mod replica;
 pub mod pull;
 pub mod push;
+pub mod replica;
 
 use std::net::SocketAddr;
 
 use crate::cmd::NextArg;
-use crate::conn::Conn;
-use crate::CstError;
-use crate::link::{Client, SharedLink};
+use crate::link::{Client, Link, SharedLink};
+use crate::replica::replica::{Replica, ReplicaStat};
 use crate::resp::Message;
 use crate::server::Server;
-use crate::replica::replica::{Replica, ReplicaStat};
+use crate::CstError;
 
-
-pub fn sync_command(server: &mut Server,client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn sync_command(
+    server: &mut Server,
+    client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let client = client.unwrap();
-    let addr = client.conn.addr.clone();
+    let addr = client.addr().to_string();
     let mut args = args.into_iter();
     let _ = args.next_u64()?; // zero meaning that the client is the one requesting a sync
     let nodeid = args.next_u64()?;
     let his_alias = args.next_string()?;
     let uuid_i_sent = args.next_u64()?;
-    let mut replica = Replica::new(addr.clone(), server.node_id, server.config.node_alias.clone(),format!("{}:{}", server.config.ip, server.config.port));
+    let mut replica = Replica::new(
+        addr.clone(),
+        server.node_id,
+        server.config.node_alias.clone(),
+        format!("{}:{}", server.config.ip, server.config.port),
+    );
     replica.meta.he.id = nodeid;
     replica.meta.he.alias = his_alias;
     replica.meta.he.addr = addr.clone();
     replica.meta.uuid_i_sent = uuid_i_sent;
-    let conn = std::mem::replace(&mut client.conn, Conn::new(None, addr.clone()));
+    let conn = client.take_conn();
     replica.stat = ReplicaStat::Handshake(conn, true);
-    replica.events = Some(server.events.new_consumer());
-    server.replicas.add_replica(addr, replica.meta.clone(), uuid);
+    replica.events = Some(server.repl_backlog.new_watcher(0));
+    server
+        .replicas
+        .add_replica(addr, replica.meta.clone(), uuid);
+
     let mut sl = SharedLink::from(replica);
-    let client_chan = server.client_chan.clone();
     tokio::spawn(async move {
-        sl.prepare(client_chan).await;
+        sl.prepare().await;
     });
     client.close = true;
     Ok(Message::None)
@@ -46,27 +57,46 @@ pub fn sync_command(server: &mut Server,client: Option<&mut Client>, _nodeid: u6
 // continue from a checkpoint, and then send their write commands to each other. They also exchange their knowledge about other
 // existing replicas of their own, and connects to them that they've never know and keep pace with them. This way two group of
 // replicas are merged into one.
-pub fn meet_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn meet_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     if server.node_id == 0 || server.node_alias.is_empty() {
-        return Ok(Message::Error("Should set my node_id and node_alias first".into()));
+        return Ok(Message::Error(
+            "Should set my node_id and node_alias first".into(),
+        ));
     }
     let mut args = args.into_iter();
-    match args.next_string()?.parse::<SocketAddr>().map(|x| x.to_string()) {
+    match args
+        .next_string()?
+        .parse::<SocketAddr>()
+        .map(|x| x.to_string())
+    {
         Ok(addr) => {
-            let mut r = Replica::new(addr.clone(), server.node_id, server.config.node_alias.clone(), server.addr.clone());
-            r.meta.uuid_i_sent = server.get_repl_last_uuid();
-            r.events = Some(server.events.new_consumer());
+            let mut r = Replica::new(
+                addr.clone(),
+                server.node_id,
+                server.config.node_alias.clone(),
+                server.addr.clone(),
+            );
+            r.meta.uuid_i_sent = server.repl_backlog.last_uuid();
+            r.events = Some(server.repl_backlog.new_watcher(0));
 
-            let i = if server.replicas.add_replica(addr.clone(), r.meta.clone(), uuid) {
+            let i = if server
+                .replicas
+                .add_replica(addr.clone(), r.meta.clone(), uuid)
+            {
                 1
             } else {
                 0
             };
-            
+
             let mut sl = SharedLink::from(r);
-            let client_chan = server.client_chan.clone();
             tokio::spawn(async move {
-                sl.prepare(client_chan).await;
+                sl.prepare().await;
             });
             Ok(Message::Integer(i))
         }
@@ -74,7 +104,13 @@ pub fn meet_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     }
 }
 
-pub fn forget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn forget_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let addr_to_forget = args.next_string()?;
     let r = if server.replicas.remove_replica(&addr_to_forget, uuid) {
@@ -87,6 +123,12 @@ pub fn forget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid
 
 // fetch the whole replica set the current node is communicating with.
 // used when a new node is joining the cooperate group.
-pub fn replicas_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, _args: Vec<Message>) -> Result<Message, CstError> {
+pub fn replicas_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    _args: Vec<Message>,
+) -> Result<Message, CstError> {
     Ok(server.replicas.generate_replicas_reply(uuid))
 }
