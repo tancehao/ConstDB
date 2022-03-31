@@ -1,6 +1,8 @@
 # Introduction
 ConstDB is an in-memory cache store which aims at master-master replications. A group of ConstDB instances can be deployed across many regions, and each of them is available for
-reading and writing. Every instance keeps in touch with all other ones. When a write command has been executed in one instance, it is asynchronously replicated to all the other instances. The data structures that are used for storing the client's data implement CRDT(Conflict-Free Replicated Data Types), thus we are sure data in different instances are eventually consistent.  
+reading and writing. Every instance keeps in touch with all other ones. When a write command has been executed in one instance, it is asynchronously replicated to all the other instances. The data structures that are used for storing the client's data implement CRDT(Conflict-Free Replicated Data Types), thus we are sure data in different instances are eventually consistent. 
+![replicas](https://user-images.githubusercontent.com/20390579/160986426-fda54bef-f678-4159-9ad0-aca9336d5fc6.png)
+
 ConstDB is compatible with redis protocol, and I have implemented a portion of redis's data types and commands. I'll keep developing it and take as much features in redis as possible into ConstDB. Contribution is also welcomed.
 
 # Features:
@@ -41,14 +43,14 @@ wait for some seconds.
 we can see that the each node stays abreast of the other.
 
 # Commands available
-- **last-write-win registers**  
+- **last-write-win register**  
     `get`, `set`, `del`  
 
 - **multi-value register**  
     `mvget`: get the list of node_id -> value pairs.  
     `mvset`: set the value corresponds to our node. Use the `-HARD` option to delete all other versions. 
 
-- **counters**:  
+- **counter**:  
     `get`, `incr`, `decr`  
 
 - **hash**  
@@ -62,15 +64,17 @@ we can see that the each node stays abreast of the other.
 - **list**  
     `llen`, `lindex`, `lrange`, `lpos`, `rpop`, `rpush`, `lpop`, `lpush`, `lrem`, `lset`, `linsert`, `ltrim`  
 
+- **generic**
+     `del`, `expire`  
+     `desc`: describe the detailed information of a crdt value.  
+
 - **control**  
-    `desc`: describe the detailed information of a crdt value.  
     `replicas`: list the replicas in the group currently.  
     `node`: tell the identification of the server.  
     `info`: show the stats collected so far.  
     `meet`: let the server to join another one's group.
     `forget`: left the server to kick another one out from the group.  
     `repllog`: print the replicate log with a specified uuid.  
-    `del`, `expire` 
 
 # Contact
 Email: tancehao93@163.com  
