@@ -69,7 +69,7 @@ we can see that the each node stays abreast of the other.
     `llen`, `lindex`, `lrange`, `lpos`, `rpop`, `rpush`, `lpop`, `lpush`, `lrem`, `lset`, `linsert`, `ltrim`  
 
 - **control**  
-    `wait`: wait until the last write has been acked by a configuable count of replicas.
+    `wait`: wait until the last write has been acked by a configuable count of replicas.  
 	`desc`: describe the detailed information of a crdt value.  
     `replicas`: list the replicas in the group currently.  
     `node`: tell the identification of the server.  
@@ -77,7 +77,7 @@ we can see that the each node stays abreast of the other.
     `meet`: let the server to join another one's group.
     `forget`: left the server to kick another one out from the group.  
     `repllog`: print the replicate log with a specified uuid.  
-    `replcheck`: check if the server has received a write command with a specified uuid from another node.
+    `replcheck`: check if the server has received a write command with a specified uuid from another node.  
 	`del`, `expire` 
 	
 

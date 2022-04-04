@@ -5,10 +5,9 @@ use crate::crdt::list::List;
 use crate::crdt::lwwhash::{Dict, Set};
 use crate::resp::Message;
 use crate::snapshot::{SnapshotLoader, SnapshotWriter};
-use crate::type_counter::Counter;
 use crate::{Bytes, CstError};
 use tokio::io::AsyncRead;
-use crate::crdt::vclock::MultiVersionVal;
+use crate::crdt::vclock::{MultiVersionVal, Counter};
 
 #[derive(Debug, Clone)]
 pub struct Object {

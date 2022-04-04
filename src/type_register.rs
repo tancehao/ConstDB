@@ -45,9 +45,13 @@ pub fn mvset_command(
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let value = args.next_bytes()?;
-    let hard = match args.next_string().map(|x| x.to_ascii_uppercase()) {
-        Ok(v) => v.as_str() == "-HARD",
-        Err(_) => false
+    let hard = if let Ok(h) = args.next_string().map(|x| x.to_ascii_uppercase()) {
+        match h.as_str() {
+            "-HARD" => true,
+            other => return Err(CstError::InvalidCmdOption("mvset", other.to_string())),
+        }
+    } else {
+        false
     };
     let o = match server.db.query(&key_name, uuid) {
         None => {

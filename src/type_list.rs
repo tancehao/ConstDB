@@ -197,10 +197,7 @@ pub fn lpos_command(
             "COUNT" => count = Some(args.next_u64()? as usize),
             "MAXLEN" => maxlen = Some(args.next_u64()? as usize),
             other => {
-                return Err(CstError::InvalidRequestMsg(format!(
-                    "Invalid option `{}` for LPOS command",
-                    other
-                )))
+                return Err(CstError::InvalidCmdOption("LPOP", other.to_string()));
             }
         }
     }
@@ -405,11 +402,8 @@ pub fn linsert_command(
     let is_before = match args.next_string()?.to_uppercase().as_str() {
         "BEFORE" => true,
         "AFTER" => false,
-        _ => {
-            return Err(CstError::InvalidRequestMsg(
-                "Should specify whether to insert the element before or after the pivot"
-                    .to_string(),
-            ))
+        other => {
+            return Err(CstError::InvalidCmdOption("LINSERT", other.to_string()));
         }
     };
     let pivot = args.next_bytes()?;
@@ -444,10 +438,7 @@ pub fn linsert_command(
     } else {
         let number = match prev {
             None => current.prev(),
-            Some(n) => {
-                debug!("n={}, current={}", n, current);
-                n.middle(Some(&current)).ok_or(CstError::SystemError)?
-            }
+            Some(n) => n.middle(Some(&current)).ok_or(CstError::SystemError)?
         };
         let n = NumberWithUUIDNodeID::new(number, uuid, nodeid);
         replicate_list_modify(
@@ -597,11 +588,7 @@ pub fn lchangeat_command(
     let is_add = match args.next_string()?.to_ascii_lowercase().as_str() {
         "add" => true,
         "rem" => false,
-        _ => {
-            return Err(CstError::InvalidRequestMsg(
-                "The command `LCHANGEAT` should be followed by `REM` or `ADD`".to_string(),
-            ))
-        }
+        other => return Err(CstError::InvalidCmdOption("LCHANGEAT", other.to_string())),
     };
     let key_name = args.next_bytes()?;
     let number = match Number::unmarshal(&args.next_string()?) {

@@ -12,6 +12,7 @@ pub extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
+extern crate rand;
 extern crate core_affinity;
 extern crate serde;
 extern crate tokio;
@@ -33,7 +34,6 @@ use log4rs::encode::pattern::PatternEncoder;
 use log4rs::Config;
 use nix::unistd::{fork, ForkResult};
 use std::hash::{Hash, Hasher};
-
 use crate::conf::GLOBAL_CONF;
 use crate::client::Client;
 use crate::link::SharedLink;
@@ -292,6 +292,8 @@ pub enum CstError {
     NeedMoreMsg,
     #[fail(display = "unknown message format {}", _0)]
     InvalidRequestMsg(String),
+    #[fail(display = "illegal option {} of command {}", _1, _0)]
+    InvalidCmdOption(&'static str, String),
     #[fail(display = "invalid data in snapshot at offset {}", _0)]
     InvalidSnapshot(usize),
     #[fail(display = "the connection with {} is broken", _0)]
@@ -300,8 +302,8 @@ pub enum CstError {
     IoError(Error),
     #[fail(display = "unknown command {}", _0)]
     UnknownCmd(String),
-    #[fail(display = "unknown subcommand {} following {}", _0, _1)]
-    UnknownSubCmd(String, String),
+    #[fail(display = "unknown subcommand {} following {}", _1, _0)]
+    UnknownSubCmd(&'static str, String),
     #[fail(display = "the replica is delayed")]
     ReplicateDelayed,
     #[fail(display = "some commands from the replica {} are missed", _0)]

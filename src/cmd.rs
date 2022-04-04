@@ -14,6 +14,7 @@ use crate::stats::info_command;
 use crate::type_counter::{decr_command, delcnt_command, incr_command};
 use crate::type_hash::{
     deldict_command, hdel_command, hget_command, hgetall_command, hset_command,
+    hkeys_command, hvals_command, hmget_command, hlen_command, hrandfield_command,
 };
 use crate::type_list::{
     dellist_command, lchangeat_command, lindex_command, linsert_command, llen_command,
@@ -21,7 +22,12 @@ use crate::type_list::{
     ltrim_command, rpop_command, rpush_command,
 };
 use crate::type_register::{delmvreg_command, mvset_command, mvget_command};
-use crate::type_set::{delset_command, sadd_command, smembers_command, spop_command, srem_command};
+use crate::type_set::{
+    delset_command, sadd_command, smembers_command, spop_command, srem_command,
+    sinter_command, sintercard_command, sinterstore_command, sdiff_command,
+    sdiffstore_command, sunion_command, sunionstore_command, sismember_command,
+    smismember_command, srandmember_command, scard_command, smove_command
+};
 use crate::{Bytes, CstError, now_mil};
 use crate::client::{Client, client_command, wait_command};
 
@@ -191,12 +197,28 @@ lazy_static! {
         new_command!(command_table, "spop", spop_command, COMMAND_WRITE);
         new_command!(command_table, "smembers", smembers_command, COMMAND_READONLY);
         new_command!(command_table, "delset", delset_command, COMMAND_WRITE | COMMAND_REPL_ONLY);
-
+        new_command!(command_table, "sinter", sinter_command, COMMAND_READONLY);
+        new_command!(command_table, "sinterstore", sinterstore_command, COMMAND_WRITE);
+        new_command!(command_table, "sintercard", sintercard_command, COMMAND_READONLY);
+        new_command!(command_table, "sunion", sunion_command, COMMAND_READONLY);
+        new_command!(command_table, "sunionstore", sunionstore_command, COMMAND_WRITE);
+        new_command!(command_table, "sdiff", sdiff_command, COMMAND_READONLY);
+        new_command!(command_table, "sdiffstore", sdiffstore_command, COMMAND_WRITE);
+        new_command!(command_table, "srandmember", srandmember_command, COMMAND_READONLY);
+        new_command!(command_table, "sismember", sismember_command, COMMAND_READONLY);
+        new_command!(command_table, "smismember", smismember_command, COMMAND_READONLY);
+        new_command!(command_table, "scard", scard_command, COMMAND_READONLY);
+        new_command!(command_table, "smove", smove_command, COMMAND_WRITE);
 
         // dict
         new_command!(command_table, "hset", hset_command, COMMAND_WRITE);
         new_command!(command_table, "hget", hget_command, COMMAND_READONLY);
         new_command!(command_table, "hgetall", hgetall_command, COMMAND_READONLY);
+        new_command!(command_table, "hkeys", hkeys_command, COMMAND_READONLY);
+        new_command!(command_table, "hlen", hlen_command, COMMAND_READONLY);
+        new_command!(command_table, "hvals", hvals_command, COMMAND_READONLY);
+        new_command!(command_table, "hrandfield", hrandfield_command, COMMAND_READONLY);
+        new_command!(command_table, "hmget", hmget_command, COMMAND_READONLY);
         new_command!(command_table, "hdel", hdel_command, COMMAND_WRITE);
         new_command!(command_table, "deldict", deldict_command, COMMAND_WRITE | COMMAND_REPL_ONLY);
 
@@ -269,7 +291,7 @@ pub fn get_command(
                 return Ok(Message::Nil);
             }
             match &o.enc {
-                Encoding::Counter(c) => Ok(Message::Integer(c.get())),
+                Encoding::Counter(c) => Ok(Message::Integer(c.get_total())),
                 Encoding::Bytes(b) => Ok(Message::BulkString(b.clone())),
                 _ => Err(CstError::InvalidType),
             }
@@ -349,7 +371,7 @@ pub fn del_command(
                 Encoding::Counter(g) => {
                     let mut d = HashMap::new();
                     for (nodeid, (value, _)) in g.iter() {
-                        d.insert(nodeid, value);
+                        d.insert(*nodeid, *value);
                     }
                     let mut args = Vec::with_capacity(d.len() * 2 + 1);
                     args.push(Message::BulkString(key_name.into()));
@@ -454,10 +476,7 @@ pub fn repllog_command(
                 .collect();
             Ok(Message::Array(uuids))
         }
-        others => Err(CstError::UnknownSubCmd(
-            others.to_string(),
-            "REPLLOG".to_string(),
-        )),
+        others => Err(CstError::UnknownSubCmd("REPLLOG", others.to_string())),
     }
 }
 

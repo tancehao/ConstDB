@@ -198,10 +198,7 @@ pub fn client_command(
         "last_write_uuid" => {
             Ok(Message::Integer(client.unwrap().last_write_uuid.map(|x| x as i64).unwrap_or(-1)))
         }
-        others => Err(CstError::UnknownSubCmd(
-            others.to_string(),
-            "CLIENT".to_string(),
-        )),
+        others => Err(CstError::UnknownSubCmd("CLIENT", others.to_string())),
     }
 }
 
@@ -219,7 +216,7 @@ pub fn wait_command(
         match option.as_str() {
             "-TIMEOUT" => timeout = Some(args.next_u64()?),
             "-QUORUM" => quorum = args.next_u64()?,
-            others => return Err(CstError::InvalidRequestMsg(format!("Unknown option for wait command {}", others))),
+            others => return Err(CstError::InvalidCmdOption("WAIT", others.to_string())),
         }
     }
     if quorum == 0 {

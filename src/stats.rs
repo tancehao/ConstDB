@@ -493,7 +493,7 @@ pub fn info_command(
             "replication" => format!("{}", m.replication),
             "cpu" => format!("{}", m.cpu),
             "keyspace" => format!("{}", m.keyspace),
-            o => return Err(CstError::UnknownSubCmd("info".to_string(), o.to_string())),
+            o => return Err(CstError::UnknownSubCmd("INFO", o.to_string())),
         },
         Err(_) => format!("{}", m),
     };

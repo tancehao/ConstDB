@@ -2,10 +2,10 @@ use crate::{Bytes, CstError};
 use crate::resp::Message;
 use std::fmt::Debug;
 use std::cmp::min;
-use crate::snapshot::{SnapshotLoader, SnapshotWriter, FileSnapshotLoader};
+use crate::snapshot::{SnapshotLoader, SnapshotWriter};
 use tokio::io::AsyncRead;
 use std::io::Write;
-use bitflags::_core::fmt::Formatter;
+use std::fmt::Formatter;
 
 type VClock<T> = MiniMap<T>;
 
@@ -37,7 +37,10 @@ impl<T: Clone> Clone for MiniMap<T> {
 }
 
 impl<T: Clone> MiniMap<T> {
-    #[allow(unused)]
+    pub fn iter(&self) -> std::slice::Iter<(u64, (T, u64))> {
+        self.values.iter()
+    }
+
     pub fn get(&self, k: &u64) -> Option<&(T, u64)> {
         match self.values.binary_search_by(|(key, _)| key.cmp(k)) {
             Ok(i) => self.values.get(i).map(|(_, v)| v),
@@ -45,7 +48,6 @@ impl<T: Clone> MiniMap<T> {
         }
     }
 
-    #[allow(unused)]
     pub fn get_mut(&mut self, k: &u64) -> Option<&mut (T, u64)> {
         match self.values.binary_search_by(|(key, _)| key.cmp(k)) {
             Ok(i) => self.values.get_mut(i).map(|(_, x)| x),
@@ -53,7 +55,6 @@ impl<T: Clone> MiniMap<T> {
         }
     }
 
-    #[allow(unused)]
     pub fn set(&mut self, k: u64, v: T, uuid: u64) {
         match self.values.binary_search_by(|(key, _)| key.cmp(&k)) {
             Ok(i) => self.values[i] = (k, (v, uuid)),
@@ -136,7 +137,7 @@ impl Counter {
         Ok(())
     }
 
-    pub async fn load_snapshot(loader: &mut FileSnapshotLoader) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(loader: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
         let size = loader.read_integer().await? as usize;
         let mut values = Vec::with_capacity(size);
         for _ in 0..size {
