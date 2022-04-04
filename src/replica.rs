@@ -5,7 +5,8 @@ pub mod replica;
 use std::net::SocketAddr;
 
 use crate::cmd::NextArg;
-use crate::link::{Client, Link, SharedLink};
+use crate::link::{Link, SharedLink};
+use crate::client::Client;
 use crate::replica::replica::{Replica, ReplicaStat};
 use crate::resp::Message;
 use crate::server::Server;
@@ -20,7 +21,7 @@ pub fn sync_command(
 ) -> Result<Message, CstError> {
     let client = client.unwrap();
     let addr = client.addr().to_string();
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let _ = args.next_u64()?; // zero meaning that the client is the one requesting a sync
     let nodeid = args.next_u64()?;
     let his_alias = args.next_string()?;
@@ -37,13 +38,13 @@ pub fn sync_command(
     replica.meta.uuid_i_sent = uuid_i_sent;
     let conn = client.take_conn();
     replica.stat = ReplicaStat::Handshake(conn, true);
-    replica.events = Some(server.repl_backlog.new_watcher(0));
+    replica.events = Some(server.repl_backlog.new_watcher());
     server
         .replicas
         .add_replica(addr, replica.meta.clone(), uuid);
 
     let mut sl = SharedLink::from(replica);
-    tokio::spawn(async move {
+    tokio::task::spawn_local(async move {
         sl.prepare().await;
     });
     client.close = true;
@@ -69,7 +70,7 @@ pub fn meet_command(
             "Should set my node_id and node_alias first".into(),
         ));
     }
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     match args
         .next_string()?
         .parse::<SocketAddr>()
@@ -83,7 +84,7 @@ pub fn meet_command(
                 server.addr.clone(),
             );
             r.meta.uuid_i_sent = server.repl_backlog.last_uuid();
-            r.events = Some(server.repl_backlog.new_watcher(0));
+            r.events = Some(server.repl_backlog.new_watcher());
 
             let i = if server
                 .replicas
@@ -95,7 +96,7 @@ pub fn meet_command(
             };
 
             let mut sl = SharedLink::from(r);
-            tokio::spawn(async move {
+            tokio::task::spawn_local(async move {
                 sl.prepare().await;
             });
             Ok(Message::Integer(i))
@@ -111,7 +112,7 @@ pub fn forget_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let addr_to_forget = args.next_string()?;
     let r = if server.replicas.remove_replica(&addr_to_forget, uuid) {
         1

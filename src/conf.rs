@@ -1,6 +1,7 @@
 use std::env::current_dir;
 
 use clap::App;
+use std::net::SocketAddrV4;
 
 lazy_static! {
     pub static ref GLOBAL_CONF: Config = parse_args();
@@ -32,6 +33,9 @@ impl Config {
         match self.log_level.as_str() {
             "OFF" | "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" => {},
             _ => return Err("log_level should be one of \"OFF\", \"TRACE\", \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"".to_string())
+        }
+        if self.addr.parse::<SocketAddrV4>().is_err() {
+            return Err(format!("address {} is not a valid ipv4 socket address", self.addr));
         }
         // TODO
         Ok(())

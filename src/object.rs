@@ -8,6 +8,7 @@ use crate::snapshot::{SnapshotLoader, SnapshotWriter};
 use crate::type_counter::Counter;
 use crate::{Bytes, CstError};
 use tokio::io::AsyncRead;
+use crate::crdt::vclock::MultiVersionVal;
 
 #[derive(Debug, Clone)]
 pub struct Object {
@@ -22,6 +23,7 @@ const OBJECT_ENC_BYTES: u8 = 1;
 const OBJECT_ENC_DICT: u8 = 2;
 const OBJECT_ENC_SET: u8 = 3;
 const OBJECT_ENC_LIST: u8 = 4;
+const OBJECT_ENC_MVREG: u8 = 5;
 
 impl Object {
     pub fn new(enc: Encoding, ct: u64, dt: u64) -> Self {
@@ -75,6 +77,7 @@ impl Object {
             }
             (Encoding::LWWDict(d), Encoding::LWWDict(od)) => d.merge(*od),
             (Encoding::LWWSet(s), Encoding::LWWSet(os)) => s.merge(*os),
+            (Encoding::MVREG(s), Encoding::MVREG(os)) => s.merge(*os),
             _ => return Err(()),
         }
         Ok(())
@@ -106,6 +109,10 @@ impl Object {
                 w.write_byte(OBJECT_ENC_LIST)?;
                 l.save_snapshot(w)
             }
+            Encoding::MVREG(r) => {
+                w.write_byte(OBJECT_ENC_MVREG)?;
+                r.save_snapshot(w)
+            }
         }
     }
 
@@ -126,7 +133,8 @@ impl Object {
             }
             OBJECT_ENC_SET => Encoding::from(Set::load_snapshot(r).await?),
             OBJECT_ENC_DICT => Encoding::from(Dict::load_snapshot(r).await?),
-            OBJECT_ENC_LIST => Encoding::from(List::empty()),
+            OBJECT_ENC_LIST => Encoding::from(List::load_snapshot(r).await?),
+            OBJECT_ENC_MVREG => Encoding::from(MultiVersionVal::load_snapshot(r).await?),
             _ => return Err(CstError::InvalidType),
         };
         Ok(Object {
@@ -144,6 +152,7 @@ impl Object {
             Encoding::LWWSet(t) => ("lwwset", t.describe()),
             Encoding::LWWDict(t) => ("lwwdict", t.describe()),
             Encoding::List(l) => ("list", l.describe()),
+            Encoding::MVREG(l) => ("mvreg", l.describe()),
         };
         Message::Array(vec![
             Message::BulkString(format!("ct: {}", self.create_time).into()),
@@ -162,6 +171,7 @@ pub enum Encoding {
     LWWSet(Box<Set>),
     LWWDict(Box<Dict>),
     List(Box<List>),
+    MVREG(Box<MultiVersionVal>),
 }
 
 impl Encoding {
@@ -172,6 +182,7 @@ impl Encoding {
             Encoding::LWWDict(_) => "LWWDict",
             Encoding::LWWSet(_) => "LWWSet",
             Encoding::List(_) => "List",
+            Encoding::MVREG(_) => "MVRegister",
         }
     }
 
@@ -230,6 +241,20 @@ impl Encoding {
             _ => Err(CstError::InvalidType),
         }
     }
+
+    pub fn as_mvreg(&self) -> Result<&MultiVersionVal, CstError> {
+        match self {
+            Encoding::MVREG(c) => Ok(c),
+            _ => Err(CstError::InvalidType),
+        }
+    }
+
+    pub fn as_mut_mvreg(&mut self) -> Result<&mut MultiVersionVal, CstError> {
+        match self {
+            Encoding::MVREG(c) => Ok(c),
+            _ => Err(CstError::InvalidType),
+        }
+    }
 }
 
 impl From<Counter> for Encoding {
@@ -259,5 +284,11 @@ impl From<Dict> for Encoding {
 impl From<List> for Encoding {
     fn from(l: List) -> Self {
         Encoding::List(Box::new(l))
+    }
+}
+
+impl From<MultiVersionVal> for Encoding {
+    fn from(v: MultiVersionVal) -> Self {
+        Encoding::MVREG(Box::new(v))
     }
 }

@@ -1,6 +1,6 @@
 use crate::cmd::NextArg;
 use crate::crdt::list::{List, Number, NumberWithUUIDNodeID};
-use crate::link::Client;
+use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::repl_backlog::ReplBacklog;
 use crate::resp::{new_msg_ok, Message};
@@ -16,7 +16,7 @@ pub fn rpop_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key = args.next_bytes()?;
     match server.db.query(&key, uuid) {
         None => Ok(Message::Nil),
@@ -56,7 +56,7 @@ pub fn lpop_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key = args.next_bytes()?;
     match server.db.query(&key, uuid) {
         None => Ok(Message::Nil),
@@ -97,7 +97,7 @@ pub fn lrem_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let cnt = args.next_i64()?;
     if cnt < 0 {
@@ -141,7 +141,7 @@ pub fn lindex_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let mut pos = args.next_i64()?;
     let resp = match server.db.query(&key_name, uuid) {
@@ -168,7 +168,7 @@ pub fn llen_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let resp = match server.db.query(&key_name, uuid) {
         None => 0,
@@ -187,7 +187,7 @@ pub fn lpos_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let target = args.next_bytes()?;
     let (mut rank, mut count, mut maxlen) = (None, None, None);
@@ -257,7 +257,7 @@ pub fn lrange_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let (mut start, mut end) = (args.next_i64()?, args.next_i64()?);
     let o = match server.db.query(&key_name, uuid) {
@@ -286,7 +286,7 @@ pub fn lset_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let (mut position, value) = (args.next_i64()?, args.next_bytes()?);
     let o = match server.db.query(&key_name, uuid) {
@@ -325,7 +325,7 @@ pub fn ltrim_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let (mut start, mut end) = (args.next_i64()?, args.next_i64()?);
     let o = match server.db.query(&key_name, uuid) {
@@ -366,7 +366,7 @@ pub fn dellist_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let o = match server.db.query(&key_name, uuid) {
         None => {
@@ -400,7 +400,7 @@ pub fn linsert_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let is_before = match args.next_string()?.to_uppercase().as_str() {
         "BEFORE" => true,
@@ -472,7 +472,7 @@ pub fn rpush_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let mut eles = vec![args.next_bytes()?];
     while let Ok(ele) = args.next_bytes() {
@@ -517,7 +517,7 @@ pub fn lpush_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let mut eles = vec![args.next_bytes()?];
     while let Ok(ele) = args.next_bytes() {
@@ -593,7 +593,7 @@ pub fn lchangeat_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let is_add = match args.next_string()?.to_ascii_lowercase().as_str() {
         "add" => true,
         "rem" => false,

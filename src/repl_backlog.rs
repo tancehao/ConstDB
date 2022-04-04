@@ -24,8 +24,8 @@ impl ReplBacklog {
         }
     }
 
-    pub fn new_watcher(&self, current: u64) -> EventsConsumer<u64> {
-        self.events.0.new_consumer(Some(current))
+    pub fn new_watcher(&self) -> EventsConsumer<u64> {
+        self.events.0.new_consumer()
     }
 
     pub fn set_size_limit(&mut self, limit: u64) {

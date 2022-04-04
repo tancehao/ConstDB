@@ -52,10 +52,11 @@ impl Writer {
     }
 
     pub fn write_msg(&mut self, msg: Message) {
-        info!("buf layer, write msg {} to {}", msg, self.addr);
+        debug!("buf layer, write msg {} to {}", msg, self.addr);
         self.write_buf.write_msg(msg)
     }
 
+    // FIXME there is a bug! To wait the buffer become empty is not necessary required!
     pub async fn send_msg(&mut self, msg: Message) -> Result<(), CstError> {
         self.write_msg(msg);
         while self.io_writable_size() > 0 {

@@ -2,14 +2,14 @@ use std::cmp::max;
 
 use crate::{Bytes, CstError};
 use crate::cmd::NextArg;
-use crate::link::Client;
+use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
 use crate::crdt::lwwhash::Dict;
 
 pub fn hset_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let kvs = {
         let mut kvs = vec![];
@@ -46,7 +46,7 @@ pub fn hset_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
 }
 
 pub fn hdel_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let fields = {
         let mut fields = vec![];
@@ -71,7 +71,7 @@ pub fn hdel_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
 }
 
 pub fn hget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let field_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
@@ -85,7 +85,7 @@ pub fn hget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
 }
 
 pub fn hgetall_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
         None => Message::Nil,
@@ -100,7 +100,7 @@ pub fn hgetall_command(server: &mut Server, _client: Option<&mut Client>, _nodei
 
 // deldict command can only be sent by our replicas
 pub fn deldict_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Dict::empty()), uuid, 0).into());
     let o = match server.db.query(&key_name, uuid) {

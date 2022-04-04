@@ -10,6 +10,8 @@ use crate::resp::Message;
 use crate::server::Server;
 use crate::snapshot::{FileSnapshotLoader, SnapshotEntry, SnapshotLoader};
 use crate::CstError;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Puller {
@@ -21,6 +23,7 @@ pub struct Puller {
     pub(crate) reader: Reader,
     pub(crate) snapshot_entries: VecDeque<SnapshotEntry>,
     pub(crate) replicates: VecDeque<Message>,
+    pub(crate) urged: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -175,7 +178,7 @@ impl Puller {
                             r.meta.he.id = node_id;
                             r.meta.uuid_he_sent = uuid;
                             r.meta.he.alias = node_alias;
-                            r.events = Some(server.repl_backlog.new_watcher(0));
+                            r.events = Some(server.repl_backlog.new_watcher());
                             if server
                                 .replicas
                                 .add_replica(addr.clone(), r.meta.clone(), add_time)
@@ -261,16 +264,14 @@ impl Puller {
                     return Ok(false);
                 } else {
                     let current_uuid = args.next_u64()?;
-                    let rpl_command_name = args.next_bytes()?;
                     let args: Vec<Message> = args.collect();
-                    match Cmd::new(rpl_command_name.as_bytes(), args) {
+                    match Cmd::new(args) {
                         Err(e) => {
                             error!(
                                 "the replica named {} sent us an unknown command {}",
                                 self.meta.he.alias, e
                             );
                             self.uuid_he_sent = current_uuid;
-                            // we treat it not as a bug because the replica may have a greater version.
                         }
                         Ok(cmd) => {
                             // Note! We do not replicate those commands received from our replicas.
@@ -286,6 +287,9 @@ impl Puller {
             }
             b"replack" => {
                 self.uuid_he_acked = args.next_u64()?;
+            }
+            b"replurge" => {
+                self.urged.store(true, Ordering::Relaxed);
             }
             _ => {
                 error!("we met an invalid command {:?} from our replica {} which should be `replicate` or `replack`", cmd_name, self.meta.he.addr);

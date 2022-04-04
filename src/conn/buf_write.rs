@@ -41,7 +41,6 @@ impl WriteBuf {
     pub fn new(addr: String) -> Self {
         let mut c = Self{
             addr,
-
             reply_pos: 0,
             reply_buf: Vec::with_capacity(DEFAULT_CLIENT_OUTPUT_BUF),
             replied: 0,
@@ -57,9 +56,7 @@ impl WriteBuf {
     }
 
     pub fn try_write<T: TryWriter>(&mut self, s: &mut T) -> io::Result<usize> {
-        //println!("conn {}, trying write, reply_buf: {:?}, self.replied: {}, self.reply_pos: {}", self.addr, String::from_utf8(self.reply_buf.as_slice().to_vec()), self.replied, self.reply_pos);
         let w = self.reply_buf[self.replied..self.reply_pos].as_ref();
-        //println!("conn {}, trying write: {:?}", self.addr, String::from_utf8(w.to_vec()));
 
         let r = s.try_write(w);
         if let Ok(size) = r {
@@ -67,7 +64,6 @@ impl WriteBuf {
             if self.replied == self.reply_pos {
                 self.replied = 0;
                 self.reply_pos = 0;
-                //println!("conn: {}, reply_pos was set to 0", self.addr);
             }
             self.replied_total += size;
         }
@@ -76,7 +72,6 @@ impl WriteBuf {
 
     #[inline]
     pub fn write_bytes(&mut self, d: &[u8]) -> &mut Self {
-        //println!("conn: {}, writing bytes: {:?}", self.addr, String::from_utf8(d.to_vec()));
         let size = d.len();
         if self.reply_pos + size > self.reply_buf.len() {
             let mut s = self.reply_buf.len();
@@ -91,7 +86,6 @@ impl WriteBuf {
         }
         self.reply_buf[self.reply_pos..self.reply_pos+size].copy_from_slice(d);
         self.reply_pos += size;
-        //println!("conn: {}, reply_buf after copy_from_slice: {:?}, reply_pos: {}, replied: {}", self.addr, String::from_utf8(self.reply_buf.to_vec()), self.reply_pos, self.replied);
         self
     }
 

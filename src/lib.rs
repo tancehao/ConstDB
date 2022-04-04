@@ -12,6 +12,7 @@ pub extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
+extern crate core_affinity;
 extern crate serde;
 extern crate tokio;
 
@@ -34,13 +35,17 @@ use nix::unistd::{fork, ForkResult};
 use std::hash::{Hash, Hasher};
 
 use crate::conf::GLOBAL_CONF;
+use crate::client::Client;
 use crate::link::SharedLink;
 use crate::server::Server;
-use crate::stats::{mem_allocated, mem_released, start_local_metric_collector};
+use crate::stats::{mem_allocated, mem_released, start_local_metric_collector, incr_clients};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::sync::mpsc::Sender;
+use crate::lib::utils::run_async_in_current_thread;
+use std::net::SocketAddr;
+use tokio::net::TcpSocket;
 
 #[macro_use]
 pub mod resp;
@@ -62,6 +67,8 @@ mod type_counter;
 mod type_hash;
 mod type_list;
 mod type_set;
+mod client;
+mod type_register;
 
 pub mod lib {
     pub mod utils;
@@ -183,9 +190,78 @@ pub fn run_server() {
         handles.push(handle);
     });
 
+    let addr = config.addr.clone();
+    let tcp_backlog = config.tcp_backlog;
+    let handle = std::thread::Builder::new()
+        .name("tcp-listener".to_string())
+        .spawn(move || {
+            run_async_in_current_thread(async move {
+                let addr = addr.parse::<SocketAddr>().unwrap();
+                let socket = TcpSocket::new_v4().unwrap();
+                if socket.set_reuseaddr(true).is_err() || socket.set_reuseport(true).is_err() {
+                    error!("Unable to reuse addr or port of address {}", addr);
+                    std::process::exit(-1);
+                }
+                if let Err(e) = socket.bind(addr) {
+                    error!("Unable to bind to address for {:?}", e);
+                    std::process::exit(-1);
+                }
+                let listener = match socket.listen(tcp_backlog) {
+                    Err(e) => {
+                        error!("Unable to listen to address for {:?}", e);
+                        std::process::exit(-1);
+                    }
+                    Ok(l) => l,
+                };
+                let mut i = 0;
+                loop {
+                    match listener.accept().await {
+                        Err(e) => {
+                            error!("Failed to accept new connection because {}", e);
+                            std::process::exit(-1);
+                        }
+                        Ok((conn, peer_addr)) => {
+                            let _ = conn.set_nodelay(true);
+                            incr_clients();
+                            let sc = SharedLink::from(Client::new(conn, peer_addr.to_string()));
+                            i += 1;
+                            loop {
+                                if client_chans[i % client_chans.len()]
+                                    .try_send(sc.clone())
+                                    .is_ok()
+                                {
+                                    break;
+                                }
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            });
+        }).unwrap();
+    handles.push(handle);
+
+    let handle = std::thread::Builder::new()
+        .name("etc".to_string())
+        .spawn(move || {
+            run_async_in_current_thread(async move {
+                crate::stats::pprof().await;
+            });
+        }).unwrap();
+    handles.push(handle);
+
     let handle = std::thread::Builder::new()
         .name("constdb-main".to_string())
         .spawn(move || {
+            match core_affinity::get_core_ids() {
+                Some(core_ids) => {
+                    if !core_ids.is_empty() {
+                        core_affinity::set_for_current(core_ids[0]);
+                    }
+                }
+                None => {}
+            }
+
             let server = Rc::new(RefCell::new(Server::new(config)));
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -194,7 +270,7 @@ pub fn run_server() {
             let ls = tokio::task::LocalSet::new();
             ls.block_on(&rt, async move {
                 start_local_metric_collector();
-                Server::run(server, client_chans).await.unwrap();
+                Server::run(server).await.unwrap();
             });
         })
         .unwrap();

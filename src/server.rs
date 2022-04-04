@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::ops::Deref;
 use std::rc::Rc;
 use std::result::Result::Ok;
@@ -8,7 +7,6 @@ use std::result::Result::Ok;
 use nix::unistd::{fork, ForkResult, Pid};
 use std::option::Option::Some;
 use std::time::Duration;
-use tokio::net::TcpSocket;
 use tokio::sync::mpsc::Receiver as tokioReceiver;
 use tokio::sync::mpsc::Sender as tokioSender;
 use tokio::sync::OwnedMutexGuard;
@@ -18,12 +16,12 @@ use tokio::time::Instant;
 
 use crate::conf::Config;
 use crate::db::DB;
-use crate::link::{Client, Link, SharedLink};
+use crate::link::Link;
 use crate::object::Object;
 use crate::repl_backlog::ReplBacklog;
 use crate::replica::replica::{ReplicaIdentity, ReplicaManager};
 use crate::snapshot::{SnapshotWriter, SNAPSHOT_FLAG_CHECKSUM};
-use crate::stats::{incr_clients, Metrics};
+use crate::stats::Metrics;
 use crate::{now_mil, Bytes, CstError};
 use once_cell::sync::OnceCell;
 use std::fmt::Debug;
@@ -52,6 +50,7 @@ pub struct Server {
     latest_dump_time: u64,
     latest_dumped_at_uuid: u64,
     actor_queue: Option<tokioReceiver<OwnedMutexGuard<Box<dyn Link + Send>>>>,
+    replicate_acked_events: (EventsProducer<u64>, EventsConsumer<u64>),
     pub metrics: Metrics,
 }
 
@@ -80,47 +79,16 @@ impl Server {
             latest_dump_time: 0,
             latest_dumped_at_uuid: 0,
             actor_queue: Some(rx),
+            replicate_acked_events: new_events_chann(),
             metrics: Default::default(),
         }
     }
 
-    pub async fn run(
-        server: Rc<RefCell<Self>>,
-        client_chans: Vec<tokioSender<SharedLink>>,
-    ) -> Result<(), std::io::Error> {
-        let addr = server.borrow().addr.clone().parse::<SocketAddr>().unwrap();
-        let config = server.borrow().config;
-        let socket = TcpSocket::new_v4()?;
-        socket.set_reuseaddr(true)?;
-        socket.set_reuseport(true)?;
-        socket.bind(addr)?;
-        let listener = socket.listen(config.tcp_backlog)?;
-        tokio::task::spawn_local(async move {
-            let mut i = 0;
-            loop {
-                match listener.accept().await {
-                    Err(e) => {
-                        error!("Failed to accept new connection because {}", e);
-                        std::process::exit(-1);
-                    }
-                    Ok((conn, peer_addr)) => {
-                        incr_clients();
-                        let sc = SharedLink::from(Client::new(conn, peer_addr.to_string()));
-                        i += 1;
-                        loop {
-                            if client_chans[i % client_chans.len()]
-                                .try_send(sc.clone())
-                                .is_ok()
-                            {
-                                break;
-                            }
-                            i += 1;
-                        }
-                    }
-                }
-            }
-        });
+    pub fn new_replica_acked_event_watcher(&self) -> EventsConsumer<u64> {
+        self.replicate_acked_events.0.new_consumer()
+    }
 
+    pub async fn run(server: Rc<RefCell<Self>>, ) -> Result<(), std::io::Error> {
         let server_cc = server.clone();
         spawn_local(async move {
             Self::cron(server_cc).await;
@@ -144,7 +112,7 @@ impl Server {
         loop {
             {
                 let mut s = server.deref().borrow_mut();
-                let _ = s.next_uuid(true);
+                let _ = s.next_uuid(now_mil(), true);
             }
             let _ = timer.tick().await;
             server.deref().borrow_mut().gc();
@@ -156,9 +124,9 @@ impl Server {
     // generate a uuid that is associated with the command currently being executed
     // this uuid is also used as a timestamp.
     // for writing,  we always return a bigger uuid.
-    pub fn next_uuid(&mut self, is_write: bool) -> u64 {
+    pub fn next_uuid(&mut self, now: u64, is_write: bool) -> u64 {
         let (time_mil, mut sequnce) = (self.uuid >> 22, (self.uuid & ((1 << 22) - 1)));
-        let now = now_mil();
+        // let now = now_mil();
         self.uuid = {
             if is_write {
                 if time_mil == now {
@@ -280,6 +248,8 @@ mod test {
     use crate::conf::Config;
     use crate::resp::Message;
     use crate::server::Server;
+    use crate::now_mil;
+
     static Conf: Config = Config {
         daemon: false,
         node_id: 1,
@@ -304,7 +274,7 @@ mod test {
         let mut server = Server::new(&Conf);
         let mut prev = 0;
         for _ in 0..1000 {
-            let c = server.next_uuid(true);
+            let c = server.next_uuid(now_mil(), true);
             println!("{}, {}", prev, c);
             assert!(c > prev);
             prev = c;
@@ -329,24 +299,12 @@ pub struct EventsProducer<T: Event> {
 
 #[derive(Debug)]
 pub struct EventsConsumer<T: Event> {
-    #[allow(unused)]
-    current: T,
     events: tokio::sync::watch::Receiver<T>,
 }
 
 pub fn new_events_chann<T: Event>() -> (EventsProducer<T>, EventsConsumer<T>) {
     let (tx, rx) = tokio::sync::watch::channel(T::default());
-    let current = {
-        let c = rx.borrow().clone();
-        c
-    };
-    (
-        EventsProducer { events: tx },
-        EventsConsumer {
-            current,
-            events: rx,
-        },
-    )
+    (EventsProducer { events: tx }, EventsConsumer { events: rx })
 }
 
 impl<T: Event> EventsProducer<T> {
@@ -354,19 +312,14 @@ impl<T: Event> EventsProducer<T> {
         let _ = self.events.send(e);
     }
 
-    pub fn new_consumer(&self, current: Option<T>) -> EventsConsumer<T> {
-        EventsConsumer::new(self.events.subscribe(), current)
+    pub fn new_consumer(&self) -> EventsConsumer<T> {
+        EventsConsumer::new(self.events.subscribe())
     }
 }
 
 impl<T: Event> EventsConsumer<T> {
-    pub fn new(rx: tokio::sync::watch::Receiver<T>, current: Option<T>) -> Self {
-        let current = match current {
-            Some(c) => c,
-            None => rx.borrow().clone(),
-        };
+    pub fn new(rx: tokio::sync::watch::Receiver<T>) -> Self {
         Self {
-            current,
             events: rx,
         }
     }

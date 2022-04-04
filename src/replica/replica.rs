@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use tokio::net::TcpSocket;
 use tokio::time::{sleep, Duration};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 pub struct ReplicaManager {
     myself: ReplicaIdentity,
@@ -29,6 +31,12 @@ impl ReplicaManager {
     pub fn add_replica(&mut self, addr: String, meta: ReplicaMeta, t: u64) -> bool {
         debug!("Adding a replica, addr={}", addr);
         self.replicas.set(addr, meta, t)
+    }
+
+    pub fn iter<F>(&self, mut f: F)
+        where F: FnMut(&ReplicaMeta) -> (),
+    {
+        self.replicas.add.iter().for_each(|(_, (_, x))| f(x));
     }
 
     pub fn remove_replica(&mut self, addr: &String, t: u64) -> bool {
@@ -305,6 +313,7 @@ impl Replica {
                             continue;
                         }
                         Ok(c) => {
+                            let _ = c.set_nodelay(true);
                             info!("Connected to replica at {}", self.meta.he.addr);
                             self.stat = ReplicaStat::Handshake(
                                 Conn::new(Some(c), self.meta.he.addr.clone()),
@@ -352,6 +361,7 @@ impl Replica {
                         .await?;
                     }
                     let (reader, writer) = conn.split();
+                    let urged = Arc::new(AtomicBool::new(false));
                     let puller = Puller {
                         uuid_he_sent: self.meta.uuid_he_sent,
                         uuid_he_acked: self.meta.uuid_he_acked,
@@ -360,6 +370,7 @@ impl Replica {
                         reader,
                         snapshot_entries: Default::default(),
                         replicates: Default::default(),
+                        urged: urged.clone(),
                     };
                     let events = self.events.take().ok_or(CstError::SystemError)?;
                     let pusher = Pusher {
@@ -370,6 +381,7 @@ impl Replica {
                         stats: PushStat::SyncReceived,
                         writer,
                         events,
+                        urged: urged,
                     };
                     self.stat = ReplicaStat::Alive(puller, pusher);
                 }

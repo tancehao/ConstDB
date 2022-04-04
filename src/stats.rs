@@ -1,6 +1,7 @@
 use crate::cmd::NextArg;
 use crate::conf::{CONF_PATH, GLOBAL_CONF};
-use crate::link::{Client, Link, LinkType, SharedLink};
+use crate::link::{Link, LinkType, SharedLink};
+use crate::client::Client;
 use crate::resp::Message;
 use crate::server::Server;
 use crate::CstError;
@@ -11,6 +12,9 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use sysinfo::{ProcessExt, SystemExt};
 use tokio::time::sleep;
+use tokio::signal::unix::SignalKind;
+use tokio::io::AsyncWriteExt;
+use crate::replica::replica::ReplicaMeta;
 
 lazy_static! {
     static ref GLOBAL_METRICS: RwLock<Metrics> = RwLock::new(Metrics::default());
@@ -313,6 +317,7 @@ pub struct Replication {
     repl_backlog_size: usize,
     repl_backlog_first_uuid: u64,
     repl_backlog_hislen: usize,
+    replica_metas: Vec<ReplicaMeta>,
 }
 
 impl Display for Replication {
@@ -337,9 +342,21 @@ impl Display for Replication {
         f.write_fmt(format_args!(
             "repl_backlog_hislen:{}\n",
             self.repl_backlog_hislen
-        ))
+        ))?;
+        for m in &self.replica_metas {
+            f.write_fmt(format_args!("replica: id={}, alias={}, addr={}, status={}, uuid_he_sent={}, uuid_he_acked={}\n",
+                                     m.he.id, m.he.alias, m.he.addr, m.status, m.uuid_he_sent, m.uuid_he_acked))?;
+        }
+        Ok(())
     }
 }
+
+impl Replication {
+    pub fn set_replica_metas(&mut self, metas: Vec<ReplicaMeta>) {
+        self.replica_metas = metas;
+    }
+}
+
 
 #[derive(Default, Debug, Clone)]
 pub struct CPU {
@@ -427,6 +444,32 @@ pub fn add_network_output_bytes(size: u64) {
     LOCAL_OUTPUT_BYTES.with(|x| x.borrow_mut().wrapping_add(size));
 }
 
+pub async fn pprof() {
+    use pprof::protos::Message as protoMessage;
+    let mut sigs = match tokio::signal::unix::signal(SignalKind::user_defined1()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Unable to start to accept USER_DEFINED1 signals for {:?}", e);
+            return;
+        }
+    };
+    loop {
+        sigs.recv().await;
+        let pprof_guard = pprof::ProfilerGuard::new(10).unwrap();
+        println!("Start to profile");
+        sleep(Duration::from_secs(5)).await;
+        println!("Stopped to profile");
+        if let Ok(report) = pprof_guard.report().build() {
+            let mut report_file = tokio::fs::File::create("profile.pb").await.unwrap();
+            let profile = report.pprof().unwrap();
+            let mut profile_data = vec![];
+            profile.encode(&mut profile_data).unwrap();
+            report_file.write_all(&profile_data).await.unwrap();
+            println!("Request profiled");
+        }
+    }
+}
+
 pub fn info_command(
     server: &mut Server,
     _client: Option<&mut Client>,
@@ -434,7 +477,12 @@ pub fn info_command(
     _uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
+    let mut replicas = vec![];
+    server.replicas.iter(|x| {
+        replicas.push(x.clone());
+    });
+    server.metrics.replication.set_replica_metas(replicas);
     let m = &server.metrics;
     let resp = match args.next_string() {
         Ok(part) => match part.to_ascii_lowercase().as_str() {

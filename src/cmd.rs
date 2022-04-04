@@ -5,7 +5,6 @@ use std::cmp::max;
 use std::fmt::{Debug, Formatter};
 
 use crate::lib::utils::bytes2i64;
-use crate::link::Client;
 use crate::object::{Encoding, Object};
 use crate::replica::{forget_command, meet_command, replicas_command, sync_command};
 use crate::resp::get_int_bytes;
@@ -21,12 +20,15 @@ use crate::type_list::{
     lpop_command, lpos_command, lpush_command, lrange_command, lrem_command, lset_command,
     ltrim_command, rpop_command, rpush_command,
 };
+use crate::type_register::{delmvreg_command, mvset_command, mvget_command};
 use crate::type_set::{delset_command, sadd_command, smembers_command, spop_command, srem_command};
-use crate::{Bytes, CstError};
+use crate::{Bytes, CstError, now_mil};
+use crate::client::{Client, client_command, wait_command};
 
 #[derive(Debug)]
 pub struct Cmd {
     args: Vec<Message>,
+    time_mil: u64,
     command: &'static Command,
 }
 
@@ -44,11 +46,19 @@ impl Display for Cmd {
 }
 
 impl Cmd {
-    pub fn new(name: &[u8], args: Vec<Message>) -> Result<Cmd, CstError> {
-        COMMANDS
-            .get(name.to_ascii_lowercase().as_slice())
-            .map(|c| Cmd { args, command: c })
-            .ok_or(CstError::UnknownCmd(String::from(Bytes::from(name))))
+    pub fn new(args: Vec<Message>) -> Result<Cmd, CstError> {
+        let command = match args.first() {
+            None => Err(CstError::WrongArity),
+            Some(cmd) => match cmd {
+                Message::BulkString(cmd) => {
+                    COMMANDS.get(cmd.as_bytes().to_ascii_lowercase().as_slice())
+                        .ok_or(CstError::UnknownCmd(cmd.clone().into()))
+                }
+                _ => Err(CstError::InvalidRequestMsg("the first argument should be of bulk string type".to_string()))
+            }
+        }?;
+
+        Ok(Cmd{command, args, time_mil: now_mil()})
     }
 
     pub fn exec(
@@ -62,7 +72,7 @@ impl Cmd {
         }
         let (nodeid, uuid) = {
             let is_write = self.command.flags | COMMAND_WRITE > 0;
-            (server.node_id, server.next_uuid(is_write))
+            (server.node_id, server.next_uuid(self.time_mil, is_write))
         };
         self.exec_detail(
             server,
@@ -147,10 +157,14 @@ lazy_static! {
         new_command!(command_table, "sync", sync_command, COMMAND_CTRL);
         new_command!(command_table, "meet", meet_command, COMMAND_CTRL);
         new_command!(command_table, "forget", forget_command, COMMAND_WRITE);
+
+        //client
+        new_command!(command_table, "wait", wait_command, COMMAND_WRITE);
         new_command!(command_table, "client", client_command, COMMAND_CTRL);
 
         //stats
         new_command!(command_table, "repllog", repllog_command, COMMAND_READONLY);
+        new_command!(command_table, "replcheck", replcheck_command, COMMAND_READONLY);
         new_command!(command_table, "info", info_command, COMMAND_READONLY);
 
         // common commands
@@ -159,6 +173,11 @@ lazy_static! {
         new_command!(command_table, "desc", desc_command, COMMAND_READONLY);
         new_command!(command_table, "del", del_command, COMMAND_WRITE | COMMAND_NO_REPLICATE);
         new_command!(command_table, "delbytes", delbytes_command, COMMAND_WRITE | COMMAND_REPL_ONLY);
+
+        // multi-version
+        new_command!(command_table, "mvget", mvget_command, COMMAND_READONLY);
+        new_command!(command_table, "mvset", mvset_command, COMMAND_WRITE);
+        new_command!(command_table, "delmvreg", delmvreg_command, COMMAND_WRITE | COMMAND_REPL_ONLY);
 
         // counter
         new_command!(command_table, "incr", incr_command, COMMAND_WRITE);
@@ -209,7 +228,7 @@ pub fn node_command(
     _uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let c_type = args.next_bytes()?;
     let v = args.next_bytes();
     match (c_type.as_bytes(), v) {
@@ -239,7 +258,7 @@ pub fn get_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     match server.db.query(&key_name, uuid) {
         Some(o) => {
@@ -266,7 +285,7 @@ pub fn set_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let value = args.next_bytes()?;
     // let o = server.db.entry(key_name).or_insert(Object::new(Encoding::Bytes(value.clone()), uuid, 0));
@@ -297,7 +316,7 @@ pub fn desc_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     match server.db.query(&key_name, uuid) {
         None => Ok(Message::Nil),
@@ -305,118 +324,14 @@ pub fn desc_command(
     }
 }
 
-// del command can be sent only by the client, not the replicas.
-// pub fn del_command(
-//     server: &mut Server,
-//     _client: Option<&mut Client>,
-//     _nodeid: u64,
-//     uuid: u64,
-//     args: Vec<Message>,
-// ) -> Result<Message, CstError> {
-//     let mut args = args.into_iter();
-//     let mut deleted = 0;
-//     let mut replicates = vec![];
-//     let key_name = args.next_bytes()?;
-//     match server.db.query(&key_name, uuid) {
-//         None => {}
-//         Some(v) => {
-//             debug!(
-//                 "deleting object, ct: {}, dt: {}, mt: {}",
-//                 v.create_time, v.delete_time, v.update_time
-//             );
-//             match &mut v.enc {
-//                 // as for counter and bytes, we don't allow deletion before some later modifications exist already.
-//                 // since we are sure that the `del` command is sent by our clients, not replicas, this policy doesn't ruin our eventual consistency.
-//                 Encoding::Counter(g) => {
-//                     if v.update_time <= uuid {
-//                         // v.ct and v.dt must be less than uuid
-//                         if v.create_time < v.delete_time {
-//                             // already deleted, and has no following modifications since that deletion
-//                         } else {
-//                             v.delete_time = uuid;
-//                             v.update_time = uuid;
-//                             deleted = 1;
-//                             let mut d = HashMap::new();
-//                             for (nodeid, (value, _)) in g.iter() {
-//                                 d.insert(nodeid, value);
-//                             }
-//                             let mut args = Vec::with_capacity(d.len() * 2 + 1);
-//                             args.push(Message::BulkString(key_name.into()));
-//                             for (nodeid, value) in d {
-//                                 g.change(nodeid, -value, uuid);
-//                                 args.push(Message::Integer(nodeid as i64));
-//                                 args.push(Message::Integer(-value));
-//                             }
-//                             replicates.push(("delcnt", args));
-//                         }
-//                     }
-//                 }
-//                 Encoding::Bytes(_) => {
-//                     if v.update_time <= uuid {
-//                         // v.ct and v.dt must be less than uuid
-//                         if v.create_time < v.delete_time { // already deleted
-//                         } else {
-//                             v.delete_time = uuid;
-//                             v.update_time = uuid;
-//                             deleted = 1;
-//                             replicates
-//                                 .push(("delbytes", vec![Message::BulkString(key_name.into())]));
-//                         }
-//                     }
-//                 }
-//                 Encoding::LWWSet(s) => {
-//                     let members: Vec<Bytes> = s.iter_all().map(|(x, _)| x.clone()).collect();
-//                     let _ = s.remove_members(members.as_slice(), uuid);
-//                     if v.create_time >= v.delete_time && uuid > v.create_time {
-//                         // exist before and now deleted
-//                         deleted = 1;
-//                     }
-//                     v.delete_time = max(v.delete_time, uuid);
-//                     v.update_time = max(v.update_time, uuid);
-//                     replicates.push(("delset", vec![Message::BulkString(key_name.into())]));
-//                 }
-//                 Encoding::LWWDict(d) => {
-//                     let fields: Vec<Bytes> = d.iter_all().map(|(b, _, _)| b.clone()).collect();
-//                     let _ = d.del_fields(fields.as_slice(), uuid);
-//                     if v.create_time >= v.delete_time && uuid > v.create_time {
-//                         // exist before and now deleted
-//                         deleted = 1;
-//                     }
-//                     v.delete_time = max(v.delete_time, uuid);
-//                     v.update_time = max(v.update_time, uuid);
-//                     replicates.push(("deldict", vec![Message::BulkString(key_name.into())]));
-//                 }
-//                 Encoding::List(l) => {
-//                     let mut args: Vec<Message> = Vec::with_capacity(l.len() * 3 + 1);
-//                     args.push(Message::BulkString(key_name.into()));
-//                     for (p, _) in l.iter() {
-//                         args.push(Message::BulkString(p.number().marshal().into()));
-//                         args.push(Message::Integer(p.uuid() as i64));
-//                         args.push(Message::Integer(p.nodeid() as i64));
-//                     }
-//                     v.delete_time = max(v.delete_time, uuid);
-//                     v.update_time = max(v.update_time, uuid);
-//                     replicates.push(("dellist", args));
-//                 }
-//             }
-//         }
-//     }
-//
-//     for (cmd, args) in replicates {
-//         server.repl_backlog.replicate_cmd(uuid, cmd, args);
-//     }
-//     Ok(Message::Integer(deleted))
-// }
-
 pub fn del_command(
     server: &mut Server,
     _client: Option<&mut Client>,
-    _nodeid: u64,
+    nodeid: u64,
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    debug!("Executing `Del` command, uuid={}", uuid);
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let mut deleted = 0;
     let mut replicates = vec![];
     let key_name = args.next_bytes()?;
@@ -472,6 +387,14 @@ pub fn del_command(
                     v.update_time = max(v.update_time, uuid);
                     replicates.push(("dellist", args));
                 }
+                Encoding::MVREG(r) => {
+                    replicates.push(("delmvreg", vec![
+                        Message::BulkString(key_name.into()),
+                        Message::Integer(nodeid as i64),
+                    ]));
+                    deleted = if r.del(nodeid, uuid) { 1 } else { 0 };
+                    v.update_time = max(v.update_time, uuid);
+                }
             }
         }
     }
@@ -489,9 +412,8 @@ pub fn delbytes_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
-    //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::Bytes("".into()), uuid, 0));
     let o = match server.db.query(&key_name, uuid) {
         None => {
             let o = Object::new(Encoding::Bytes("".into()), uuid, 0);
@@ -516,7 +438,7 @@ pub fn repllog_command(
     _uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let sub_command = args.next_string()?;
     match sub_command.to_ascii_lowercase().as_str() {
         "at" => {
@@ -539,25 +461,27 @@ pub fn repllog_command(
     }
 }
 
-pub fn client_command(
-    _server: &mut Server,
-    client: Option<&mut Client>,
+pub fn replcheck_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
     _nodeid: u64,
     _uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
-    let sub_command = args.next_string()?;
-    match sub_command.to_ascii_lowercase().as_str() {
-        "threadid" => {
-            let tid = client.unwrap().thread_id;
-            Ok(Message::BulkString(format!("{:?}", tid).into()))
+    let mut args = args.into_iter().skip(1);
+    let node_addr = args.next_string()?;
+    let node_uuid = args.next_u64()?;
+    let mut r = -1;
+    server.replicas.iter(|x| {
+        if x.he.addr == node_addr {
+            if x.uuid_he_acked <= node_uuid {
+                r = 1;
+            } else {
+                r = 0;
+            }
         }
-        others => Err(CstError::UnknownSubCmd(
-            others.to_string(),
-            "CLIENT".to_string(),
-        )),
-    }
+    });
+    Ok(Message::Integer(r))
 }
 
 pub trait NextArg {

@@ -4,7 +4,7 @@ use tokio::macros::support::thread_rng_n;
 
 use crate::cmd::NextArg;
 use crate::crdt::lwwhash::Set;
-use crate::link::Client;
+use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
@@ -17,7 +17,7 @@ pub fn sadd_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let members = {
         let mut members = vec![];
@@ -54,7 +54,7 @@ pub fn srem_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let members = {
         let mut members = vec![];
@@ -85,7 +85,7 @@ pub fn smembers_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
         None => Message::Nil,
@@ -109,7 +109,7 @@ pub fn spop_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
 
     let o = match server.db.query(&key_name, uuid) {
@@ -148,7 +148,7 @@ pub fn delset_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Set::empty()), uuid, 0).into());
     let o = match server.db.query(&key_name, uuid) {

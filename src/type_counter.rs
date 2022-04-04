@@ -5,7 +5,7 @@ use std::io::Write;
 use std::cmp::max;
 
 use crate::cmd::NextArg;
-use crate::link::Client;
+use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
@@ -156,7 +156,7 @@ pub fn delcnt_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let o = match server.db.query(&key_name, uuid) {
         None => {
@@ -188,7 +188,7 @@ pub fn incr_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     //let o = server.db.query_or_insert(key_name, uuid)
     let o = match server.db.query(&key_name, uuid) {
@@ -212,7 +212,7 @@ pub fn decr_command(
     uuid: u64,
     args: Vec<Message>,
 ) -> Result<Message, CstError> {
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Counter::default()), uuid, 0).into());
     let o = match server.db.query(&key_name, uuid) {
