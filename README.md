@@ -60,10 +60,12 @@ we can see that the each node stays abreast of the other.
 - **hash**  
     `hset`: last write win  
     `hdel`: add win  
-    `hget`, `hgetall`  
+    `hget`, `hgetall`, `hkeys`, `hlen`, `hvals`, `hrandfield`, `hmget`  
 
 - **set**  
-    `sadd`, `srem`, `spop`, `smembers`  
+    `sadd`, `srem`, `spop`, `smembers`:  add win  
+    `sinter`, `sintersotre`, `sintercard`, `sunion`, `sunionstore`,
+    `sdiff`, `sdiffsotre`, `srandmember`, `sismember`, `smismember`, `scard`, `smove`  
 
 - **list**  
     `llen`, `lindex`, `lrange`, `lpos`, `rpop`, `rpush`, `lpop`, `lpush`, `lrem`, `lset`, `linsert`, `ltrim`  

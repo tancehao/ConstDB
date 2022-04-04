@@ -310,7 +310,6 @@ pub fn set_command(
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let value = args.next_bytes()?;
-    // let o = server.db.entry(key_name).or_insert(Object::new(Encoding::Bytes(value.clone()), uuid, 0));
     let o = match server.db.query(&key_name, uuid) {
         None => {
             let o = Object::new(Encoding::Bytes(value.clone()), uuid, 0);
