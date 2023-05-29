@@ -1,17 +1,23 @@
 use std::cmp::max;
 
-use crate::{Bytes, CstError};
-use crate::cmd::NextArg;
 use crate::client::Client;
+use crate::cmd::NextArg;
+use crate::crdt::lwwhash::Dict;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
-use crate::crdt::lwwhash::Dict;
+use crate::{Bytes, CstError};
 use bitflags::_core::cmp::min;
-use rand::{thread_rng, Rng};
 use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 
-pub fn hset_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hset_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let kvs = {
@@ -48,7 +54,13 @@ pub fn hset_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     Ok(Message::Integer(cnt as i64))
 }
 
-pub fn hdel_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hdel_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let fields = {
@@ -72,7 +84,13 @@ pub fn hdel_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     Ok(Message::Integer(cnt as i64))
 }
 
-pub fn hget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hget_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let field_name = args.next_bytes()?;
@@ -80,20 +98,36 @@ pub fn hget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
         None => Message::Nil,
         Some(o) => {
             let s = o.enc.as_dict()?;
-            s.get(&field_name).map(|x| Message::BulkString(x.clone())).unwrap_or(Message::Nil)
+            s.get(&field_name)
+                .map(|x| Message::BulkString(x.clone()))
+                .unwrap_or(Message::Nil)
         }
     };
     Ok(res)
 }
 
-pub fn hgetall_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hgetall_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
         None => Message::Nil,
         Some(o) => {
             let s = o.enc.as_dict()?;
-            let kvs: Vec<Message> = s.iter().map(|(k, (_, v))| Message::Array(vec![Message::BulkString(k.clone()), Message::BulkString(v.clone())])).collect();
+            let kvs: Vec<Message> = s
+                .iter()
+                .map(|(k, (_, v))| {
+                    Message::Array(vec![
+                        Message::BulkString(k.clone()),
+                        Message::BulkString(v.clone()),
+                    ])
+                })
+                .collect();
             Message::Array(kvs)
         }
     };
@@ -101,7 +135,13 @@ pub fn hgetall_command(server: &mut Server, _client: Option<&mut Client>, _nodei
 }
 
 // deldict command can only be sent by our replicas
-pub fn deldict_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn deldict_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     //let o = server.db.entry(key_name).or_insert(Object::new(Encoding::from(Dict::empty()), uuid, 0).into());
@@ -121,20 +161,36 @@ pub fn deldict_command(server: &mut Server, _client: Option<&mut Client>, _nodei
     Ok(Message::None)
 }
 
-pub fn hkeys_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hkeys_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
         None => Message::Nil,
         Some(o) => {
             let s = o.enc.as_dict()?;
-            Message::Array(s.iter().map(|(k, _)| Message::BulkString(k.clone())).collect())
+            Message::Array(
+                s.iter()
+                    .map(|(k, _)| Message::BulkString(k.clone()))
+                    .collect(),
+            )
         }
     };
     Ok(res)
 }
 
-pub fn hlen_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hlen_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter();
     let key_name = args.next_bytes()?;
     let res = match server.db.query(&key_name, uuid) {
@@ -147,7 +203,13 @@ pub fn hlen_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: 
     Ok(res)
 }
 
-pub fn hmget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hmget_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let mut fields = vec![args.next_bytes()?];
@@ -158,13 +220,25 @@ pub fn hmget_command(server: &mut Server, _client: Option<&mut Client>, _nodeid:
         None => fields.into_iter().map(|_| Message::Nil).collect(),
         Some(o) => {
             let s = o.enc.as_dict()?;
-            fields.into_iter().map(|f| { s.get(&f).map_or(Message::Nil, |x| Message::BulkString(x.clone())) }).collect()
+            fields
+                .into_iter()
+                .map(|f| {
+                    s.get(&f)
+                        .map_or(Message::Nil, |x| Message::BulkString(x.clone()))
+                })
+                .collect()
         }
     };
     Ok(Message::Array(res))
 }
 
-pub fn hrandfield_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hrandfield_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let count = args.next_i64().ok();
@@ -214,7 +288,13 @@ pub fn hrandfield_command(server: &mut Server, _client: Option<&mut Client>, _no
     Ok(res)
 }
 
-pub fn hvals_command(server: &mut Server, _client: Option<&mut Client>, _nodeid: u64, uuid: u64, args: Vec<Message>) -> Result<Message, CstError> {
+pub fn hvals_command(
+    server: &mut Server,
+    _client: Option<&mut Client>,
+    _nodeid: u64,
+    uuid: u64,
+    args: Vec<Message>,
+) -> Result<Message, CstError> {
     let mut args = args.into_iter().skip(1);
     let key_name = args.next_bytes()?;
     let mut fields = vec![args.next_bytes()?];
@@ -225,7 +305,9 @@ pub fn hvals_command(server: &mut Server, _client: Option<&mut Client>, _nodeid:
         None => vec![],
         Some(o) => {
             let s = o.enc.as_dict()?;
-            s.iter().map(|(_, (_, v))| Message::BulkString(v.clone())).collect()
+            s.iter()
+                .map(|(_, (_, v))| Message::BulkString(v.clone()))
+                .collect()
         }
     };
     Ok(Message::Array(res))

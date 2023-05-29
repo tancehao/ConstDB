@@ -8,12 +8,14 @@ use crate::resp::Message;
 use crate::server::{EventsConsumer, Server};
 use crate::snapshot::{SnapshotWriter, SNAPSHOT_FLAG_REPLICA_ADD, SNAPSHOT_FLAG_REPLICA_REM};
 use crate::CstError;
+use async_trait::async_trait;
+use log::*;
 use std::collections::HashMap;
 use std::io::Write;
-use tokio::net::TcpSocket;
-use tokio::time::{sleep, Duration};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tokio::net::TcpSocket;
+use tokio::time::{sleep, Duration};
 
 pub struct ReplicaManager {
     myself: ReplicaIdentity,
@@ -34,7 +36,8 @@ impl ReplicaManager {
     }
 
     pub fn iter<F>(&self, mut f: F)
-        where F: FnMut(&ReplicaMeta) -> (),
+    where
+        F: FnMut(&ReplicaMeta) -> (),
     {
         self.replicas.add.iter().for_each(|(_, (_, x))| f(x));
     }

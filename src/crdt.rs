@@ -1,3 +1,3 @@
-pub mod vclock;
-pub mod lwwhash;
 pub mod list;
+pub mod lwwhash;
+pub mod vclock;

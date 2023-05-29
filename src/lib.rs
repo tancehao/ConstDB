@@ -1,21 +1,7 @@
-#[macro_use]
-extern crate async_trait;
-extern crate bitflags;
-#[macro_use]
-extern crate clap;
-pub extern crate colour;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-pub extern crate lazy_static;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate serde_derive;
-extern crate rand;
-extern crate core_affinity;
-extern crate serde;
-extern crate tokio;
+use log::*;
+
+pub use async_trait;
+use failure::Fail;
 
 use std::fs::OpenOptions;
 use std::io::Error;
@@ -23,6 +9,12 @@ use std::io::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::client::Client;
+use crate::conf::GLOBAL_CONF;
+use crate::lib::utils::run_async_in_current_thread;
+use crate::link::SharedLink;
+use crate::server::Server;
+use crate::stats::{incr_clients, mem_allocated, mem_released, start_local_metric_collector};
 use log::LevelFilter;
 use log4rs::append::console::ConsoleAppender;
 use log4rs::append::rolling_file::policy::compound::roll::delete::DeleteRoller;
@@ -33,25 +25,20 @@ use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use log4rs::Config;
 use nix::unistd::{fork, ForkResult};
-use std::hash::{Hash, Hasher};
-use crate::conf::GLOBAL_CONF;
-use crate::client::Client;
-use crate::link::SharedLink;
-use crate::server::Server;
-use crate::stats::{mem_allocated, mem_released, start_local_metric_collector, incr_clients};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
+use std::net::SocketAddr;
 use std::rc::Rc;
 use tokio::sync::mpsc::Sender;
-use crate::lib::utils::run_async_in_current_thread;
-use std::net::SocketAddr;
+
 use tokio::net::TcpSocket;
 
 #[macro_use]
 pub mod resp;
-#[macro_use]
 pub mod link;
 
+mod client;
 mod cmd;
 mod conf;
 pub mod conn;
@@ -66,9 +53,8 @@ mod stats;
 mod type_counter;
 mod type_hash;
 mod type_list;
-mod type_set;
-mod client;
 mod type_register;
+mod type_set;
 
 pub mod lib {
     pub mod utils;
@@ -238,7 +224,8 @@ pub fn run_server() {
                     }
                 }
             });
-        }).unwrap();
+        })
+        .unwrap();
     handles.push(handle);
 
     let handle = std::thread::Builder::new()
@@ -247,7 +234,8 @@ pub fn run_server() {
             run_async_in_current_thread(async move {
                 crate::stats::pprof().await;
             });
-        }).unwrap();
+        })
+        .unwrap();
     handles.push(handle);
 
     let handle = std::thread::Builder::new()

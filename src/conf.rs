@@ -1,3 +1,6 @@
+use clap::load_yaml;
+use lazy_static::lazy_static;
+use serde_derive::Deserialize;
 use std::env::current_dir;
 
 use clap::App;
@@ -35,7 +38,10 @@ impl Config {
             _ => return Err("log_level should be one of \"OFF\", \"TRACE\", \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"".to_string())
         }
         if self.addr.parse::<SocketAddrV4>().is_err() {
-            return Err(format!("address {} is not a valid ipv4 socket address", self.addr));
+            return Err(format!(
+                "address {} is not a valid ipv4 socket address",
+                self.addr
+            ));
         }
         // TODO
         Ok(())

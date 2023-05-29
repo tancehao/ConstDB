@@ -1,12 +1,13 @@
 use std::cmp::min;
 
+use log::*;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, ErrorKind};
 use tokio::net::tcp::OwnedReadHalf;
 
 use crate::conn::buf_read::ReadBuf;
-use crate::CstError;
 use crate::resp::Message;
+use crate::CstError;
 
 #[derive(Debug, Default)]
 pub struct Reader {
@@ -17,7 +18,7 @@ pub struct Reader {
 
 impl Reader {
     pub fn new(addr: String, conn: Option<OwnedReadHalf>) -> Self {
-        Self{
+        Self {
             conn,
             read_buf: ReadBuf::new(addr.clone()),
             addr,
@@ -36,22 +37,23 @@ impl Reader {
 
     pub fn read_input(&mut self) -> Result<Option<usize>, CstError> {
         match &self.conn {
-            Some(conn) => {
-                match self.read_buf.try_read(conn) {
-                    Ok(size) => {
-                        debug!("io layer, read {} bytes into input_buf from {}", size, self.addr);
-                        Ok(Some(size))
-                    },
-                    Err(e) => {
-                        if e.kind() != ErrorKind::WouldBlock {
-                            error!("error: {}", e);
-                            return Err(CstError::from(e));
-                        }
-                        Ok(None)
-                    }
+            Some(conn) => match self.read_buf.try_read(conn) {
+                Ok(size) => {
+                    debug!(
+                        "io layer, read {} bytes into input_buf from {}",
+                        size, self.addr
+                    );
+                    Ok(Some(size))
                 }
-            }
-            None => Err(CstError::SystemError)
+                Err(e) => {
+                    if e.kind() != ErrorKind::WouldBlock {
+                        error!("error: {}", e);
+                        return Err(CstError::from(e));
+                    }
+                    Ok(None)
+                }
+            },
+            None => Err(CstError::SystemError),
         }
     }
 
@@ -101,7 +103,11 @@ impl Reader {
         self.read_buf.io_readable_size()
     }
 
-    pub async fn save_to_file(&mut self, target: &mut File, mut size: usize) -> Result<(), CstError> {
+    pub async fn save_to_file(
+        &mut self,
+        target: &mut File,
+        mut size: usize,
+    ) -> Result<(), CstError> {
         debug!("Saving snapshot into a file, size: {}", size);
         loop {
             let buf = self.read_buf.buf_reader();

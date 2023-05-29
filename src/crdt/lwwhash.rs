@@ -1,11 +1,11 @@
+use crate::resp::Message;
+use crate::snapshot::{SnapshotLoader, SnapshotWriter};
+use crate::{Bytes, CstError};
+use std::cmp::max;
+use std::collections::hash_map::Iter;
 use std::collections::HashMap;
 use std::hash::Hash;
-use crate::{Bytes, CstError};
-use crate::resp::Message;
 use std::io::Write;
-use crate::snapshot::{SnapshotWriter, SnapshotLoader};
-use std::collections::hash_map::Iter;
-use std::cmp::max;
 use tokio::io::AsyncRead;
 
 #[derive(Debug, Clone)]
@@ -16,11 +16,11 @@ pub struct LWWHash<K, V> {
 }
 
 impl<K, V> LWWHash<K, V>
-    where K: Eq + Hash + Clone
+where
+    K: Eq + Hash + Clone,
 {
-
     pub fn empty() -> Self {
-        Self{
+        Self {
             size: 0,
             add: HashMap::new(),
             del: HashMap::new(),
@@ -34,20 +34,22 @@ impl<K, V> LWWHash<K, V>
             None => None,
             Some((t1, v)) => match self.del.get(&k) {
                 None => Some(v),
-                Some(t2) => if *t1 >= *t2 {
-                    Some(v)
-                } else {
-                    None
+                Some(t2) => {
+                    if *t1 >= *t2 {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 }
-            }
+            },
         }
     }
 
     pub fn removed(&self, k: &K) -> bool {
-        match (self.add.get(k) , self.del.get(k)) {
+        match (self.add.get(k), self.del.get(k)) {
             (_, None) => false,
             (None, Some(_)) => true,
-            (Some((at, _)), Some(dt)) => *at < *dt
+            (Some((at, _)), Some(dt)) => *at < *dt,
         }
     }
 
@@ -75,12 +77,14 @@ impl<K, V> LWWHash<K, V>
             None => None,
             Some((t1, v)) => match self.del.get(k) {
                 None => Some(v),
-                Some(t2) => if *t1 >= *t2 {
-                    Some(v)
-                } else {
-                    None
+                Some(t2) => {
+                    if *t1 >= *t2 {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 }
-            }
+            },
         }
     }
 
@@ -91,11 +95,13 @@ impl<K, V> LWWHash<K, V>
             }
         }
         match self.add.get_mut(&k) {
-            Some((tt, vv)) => if *tt > t {
-                return false;
-            } else {
-                *vv = v;
-                *tt = t;
+            Some((tt, vv)) => {
+                if *tt > t {
+                    return false;
+                } else {
+                    *vv = v;
+                    *tt = t;
+                }
             }
             None => {
                 let _ = self.del.remove(&k);
@@ -113,10 +119,12 @@ impl<K, V> LWWHash<K, V>
             }
         }
         match self.del.get_mut(k) {
-            Some(tt) => if *tt > t {
-                return false
-            } else {
-                *tt = t;
+            Some(tt) => {
+                if *tt > t {
+                    return false;
+                } else {
+                    *tt = t;
+                }
             }
             None => {
                 self.del.insert(k.clone(), t);
@@ -132,14 +140,14 @@ pub type Dict = LWWHash<Bytes, Bytes>;
 
 impl Dict {
     pub fn iter(&self) -> DictIter {
-        DictIter{
+        DictIter {
             i: self.add.iter(),
             h: self,
         }
     }
 
     pub fn iter_all(&self) -> DictAllIter {
-        DictAllIter{
+        DictAllIter {
             a: self.add.iter(),
             d: self.del.iter(),
         }
@@ -151,7 +159,7 @@ impl Dict {
 
     pub fn set_fields(&mut self, kvs: Vec<(Bytes, Bytes)>, uuid: u64) -> u32 {
         let mut cnt = 0;
-        for (k, v) in kvs.into_iter().next() {
+        for (k, v) in kvs.into_iter() {
             if self.set_field(k, v, uuid) {
                 cnt += 1;
             }
@@ -181,8 +189,27 @@ impl Dict {
     }
 
     pub fn describe(&self) -> Message {
-        let a: Vec<Message> = self.add.iter().map(|(k, (v, vv))| Message::Array(vec![Message::BulkString(k.clone()), Message::Integer(*v as i64), Message::BulkString(vv.clone())])).collect();
-        let d: Vec<Message> = self.del.iter().map(|(k, v)| Message::Array(vec![Message::BulkString(k.clone()), Message::Integer(*v as i64)])).collect();
+        let a: Vec<Message> = self
+            .add
+            .iter()
+            .map(|(k, (v, vv))| {
+                Message::Array(vec![
+                    Message::BulkString(k.clone()),
+                    Message::Integer(*v as i64),
+                    Message::BulkString(vv.clone()),
+                ])
+            })
+            .collect();
+        let d: Vec<Message> = self
+            .del
+            .iter()
+            .map(|(k, v)| {
+                Message::Array(vec![
+                    Message::BulkString(k.clone()),
+                    Message::Integer(*v as i64),
+                ])
+            })
+            .collect();
         Message::Array(vec![Message::Array(a), Message::Array(d)])
     }
 
@@ -204,7 +231,9 @@ impl Dict {
         Ok(())
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(src: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        src: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
         let mut s = Self::empty();
         let add_cnt = src.read_integer().await? as usize;
         for _ in 0..add_cnt {
@@ -256,7 +285,10 @@ impl<'a> Iterator for DictAllIter<'a> {
     type Item = (&'a Bytes, u64, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.a.next().map(|(b, (u, _))| (b, *u, true)).or(self.d.next().map(|(b, u)| (b, *u, false)))
+        self.a
+            .next()
+            .map(|(b, (u, _))| (b, *u, true))
+            .or(self.d.next().map(|(b, u)| (b, *u, false)))
     }
 }
 
@@ -293,14 +325,14 @@ impl Set {
     }
 
     pub fn iter(&self) -> SetIter {
-        SetIter{
+        SetIter {
             i: self.add.iter(),
             s: self,
         }
     }
 
     pub fn iter_all(&self) -> SetAllIter {
-        SetAllIter{
+        SetAllIter {
             a: self.add.iter(),
             d: self.del.iter(),
         }
@@ -311,8 +343,26 @@ impl Set {
     }
 
     pub fn describe(&self) -> Message {
-        let a: Vec<Message> = self.add.iter().map(|(k, (v, _))| Message::Array(vec![Message::BulkString(k.clone()), Message::Integer(*v as i64)])).collect();
-        let d: Vec<Message> = self.del.iter().map(|(k, v)| Message::Array(vec![Message::BulkString(k.clone()), Message::Integer(*v as i64)])).collect();
+        let a: Vec<Message> = self
+            .add
+            .iter()
+            .map(|(k, (v, _))| {
+                Message::Array(vec![
+                    Message::BulkString(k.clone()),
+                    Message::Integer(*v as i64),
+                ])
+            })
+            .collect();
+        let d: Vec<Message> = self
+            .del
+            .iter()
+            .map(|(k, v)| {
+                Message::Array(vec![
+                    Message::BulkString(k.clone()),
+                    Message::Integer(*v as i64),
+                ])
+            })
+            .collect();
         Message::Array(vec![Message::Array(a), Message::Array(d)])
     }
 
@@ -338,7 +388,9 @@ impl Set {
         Ok(())
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(src: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        src: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
         let mut s = Self::empty();
         let add_cnt = src.read_integer().await? as usize;
         for _ in 0..add_cnt {
@@ -388,6 +440,9 @@ impl<'a> Iterator for SetAllIter<'a> {
     type Item = (&'a Bytes, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.a.next().map(|(b, (u, _))| (b, *u)).or(self.d.next().map(|(b, u)| (b, *u)))
+        self.a
+            .next()
+            .map(|(b, (u, _))| (b, *u))
+            .or(self.d.next().map(|(b, u)| (b, *u)))
     }
 }

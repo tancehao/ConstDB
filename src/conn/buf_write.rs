@@ -1,7 +1,7 @@
-use tokio::io;
-use crate::Bytes;
 use crate::resp::Message;
 use crate::stats::add_network_output_bytes;
+use crate::Bytes;
+use tokio::io;
 
 pub const DEFAULT_CLIENT_OUTPUT_BUF: usize = 128;
 pub const RESP_TYPE_STRING: u8 = b'+';
@@ -10,7 +10,7 @@ pub const RESP_TYPE_INTEGER: u8 = b':';
 pub const RESP_TYPE_BULK: u8 = b'$';
 pub const RESP_TYPE_ARRAY: u8 = b'*';
 
-thread_local!{
+thread_local! {
     pub static INT_BYTES: Vec<Bytes> = {
         let mut m = Vec::new();
         for i in 0..10001 {
@@ -22,7 +22,7 @@ thread_local!{
 
 pub fn get_int_bytes(n: i64) -> Bytes {
     if n >= -1 && n < 10000 {
-        INT_BYTES.with(|x| x[(n+1) as usize].clone())
+        INT_BYTES.with(|x| x[(n + 1) as usize].clone())
     } else {
         format!("{}", n).into()
     }
@@ -39,7 +39,7 @@ pub struct WriteBuf {
 
 impl WriteBuf {
     pub fn new(addr: String) -> Self {
-        let mut c = Self{
+        let mut c = Self {
             addr,
             reply_pos: 0,
             reply_buf: Vec::with_capacity(DEFAULT_CLIENT_OUTPUT_BUF),
@@ -76,15 +76,11 @@ impl WriteBuf {
         if self.reply_pos + size > self.reply_buf.len() {
             let mut s = self.reply_buf.len();
             while self.reply_pos + size >= s {
-                s = if s < 2048 {
-                    s * 2
-                } else {
-                    s * 3 / 4
-                };
+                s = if s < 2048 { s * 2 } else { s * 3 / 4 };
             }
             self.reply_buf.resize(s, 0);
         }
-        self.reply_buf[self.reply_pos..self.reply_pos+size].copy_from_slice(d);
+        self.reply_buf[self.reply_pos..self.reply_pos + size].copy_from_slice(d);
         self.reply_pos += size;
         self
     }
@@ -121,28 +117,38 @@ impl WriteBuf {
     pub fn write_msg(&mut self, msg: Message) {
         //println!("conn: {}, writing Message: {}", self.addr, msg);
         match msg {
-            Message::None => {},
+            Message::None => {}
             Message::Nil => {
                 self.write_bytes(b"$-1\r\n");
-            },
+            }
             Message::BulkString(s) => {
-                self.write_bytes(b"$").write_integer(s.len() as i64).write_crcf().write_bytes(s.as_bytes()).write_crcf();
+                self.write_bytes(b"$")
+                    .write_integer(s.len() as i64)
+                    .write_crcf()
+                    .write_bytes(s.as_bytes())
+                    .write_crcf();
             }
             Message::Error(e) => {
-                self.write_bytes(b"-").write_bytes(e.as_bytes()).write_crcf();
+                self.write_bytes(b"-")
+                    .write_bytes(e.as_bytes())
+                    .write_crcf();
             }
             Message::String(s) => {
-                self.write_bytes(b"+").write_bytes(s.as_bytes()).write_crcf();
+                self.write_bytes(b"+")
+                    .write_bytes(s.as_bytes())
+                    .write_crcf();
             }
             Message::Integer(i) => {
                 self.write_bytes(b":").write_integer(i).write_crcf();
             }
             Message::Array(msgs) => {
-                self.write_bytes(b"*").write_integer(msgs.len() as i64).write_crcf();
+                self.write_bytes(b"*")
+                    .write_integer(msgs.len() as i64)
+                    .write_crcf();
                 for msg in msgs {
                     self.write_msg(msg);
                 }
-            },
+            }
         }
     }
 

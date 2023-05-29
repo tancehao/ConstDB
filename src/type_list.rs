@@ -1,11 +1,12 @@
+use crate::client::Client;
 use crate::cmd::NextArg;
 use crate::crdt::list::{List, Number, NumberWithUUIDNodeID};
-use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::repl_backlog::ReplBacklog;
 use crate::resp::{new_msg_ok, Message};
 use crate::server::Server;
 use crate::{Bytes, CstError};
+use log::*;
 use std::cmp::{max, min};
 use std::result::Result::Ok;
 
@@ -438,7 +439,7 @@ pub fn linsert_command(
     } else {
         let number = match prev {
             None => current.prev(),
-            Some(n) => n.middle(Some(&current)).ok_or(CstError::SystemError)?
+            Some(n) => n.middle(Some(&current)).ok_or(CstError::SystemError)?,
         };
         let n = NumberWithUUIDNodeID::new(number, uuid, nodeid);
         replicate_list_modify(

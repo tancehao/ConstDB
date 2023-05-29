@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use lazy_static::lazy_static;
+use log::*;
 use std::cmp::max;
 use std::fmt::{Debug, Formatter};
 
+use crate::client::{client_command, wait_command, Client};
 use crate::lib::utils::bytes2i64;
 use crate::object::{Encoding, Object};
 use crate::replica::{forget_command, meet_command, replicas_command, sync_command};
@@ -13,23 +16,22 @@ use crate::server::Server;
 use crate::stats::info_command;
 use crate::type_counter::{decr_command, delcnt_command, incr_command};
 use crate::type_hash::{
-    deldict_command, hdel_command, hget_command, hgetall_command, hset_command,
-    hkeys_command, hvals_command, hmget_command, hlen_command, hrandfield_command,
+    deldict_command, hdel_command, hget_command, hgetall_command, hkeys_command, hlen_command,
+    hmget_command, hrandfield_command, hset_command, hvals_command,
 };
 use crate::type_list::{
     dellist_command, lchangeat_command, lindex_command, linsert_command, llen_command,
     lpop_command, lpos_command, lpush_command, lrange_command, lrem_command, lset_command,
     ltrim_command, rpop_command, rpush_command,
 };
-use crate::type_register::{delmvreg_command, mvset_command, mvget_command};
+use crate::type_register::{delmvreg_command, mvget_command, mvset_command};
 use crate::type_set::{
-    delset_command, sadd_command, smembers_command, spop_command, srem_command,
-    sinter_command, sintercard_command, sinterstore_command, sdiff_command,
-    sdiffstore_command, sunion_command, sunionstore_command, sismember_command,
-    smismember_command, srandmember_command, scard_command, smove_command
+    delset_command, sadd_command, scard_command, sdiff_command, sdiffstore_command, sinter_command,
+    sintercard_command, sinterstore_command, sismember_command, smembers_command,
+    smismember_command, smove_command, spop_command, srandmember_command, srem_command,
+    sunion_command, sunionstore_command,
 };
-use crate::{Bytes, CstError, now_mil};
-use crate::client::{Client, client_command, wait_command};
+use crate::{now_mil, Bytes, CstError};
 
 #[derive(Debug)]
 pub struct Cmd {
@@ -56,15 +58,20 @@ impl Cmd {
         let command = match args.first() {
             None => Err(CstError::WrongArity),
             Some(cmd) => match cmd {
-                Message::BulkString(cmd) => {
-                    COMMANDS.get(cmd.as_bytes().to_ascii_lowercase().as_slice())
-                        .ok_or(CstError::UnknownCmd(cmd.clone().into()))
-                }
-                _ => Err(CstError::InvalidRequestMsg("the first argument should be of bulk string type".to_string()))
-            }
+                Message::BulkString(cmd) => COMMANDS
+                    .get(cmd.as_bytes().to_ascii_lowercase().as_slice())
+                    .ok_or(CstError::UnknownCmd(cmd.clone().into())),
+                _ => Err(CstError::InvalidRequestMsg(
+                    "the first argument should be of bulk string type".to_string(),
+                )),
+            },
         }?;
 
-        Ok(Cmd{command, args, time_mil: now_mil()})
+        Ok(Cmd {
+            command,
+            args,
+            time_mil: now_mil(),
+        })
     }
 
     pub fn exec(
@@ -409,10 +416,13 @@ pub fn del_command(
                     replicates.push(("dellist", args));
                 }
                 Encoding::MVREG(r) => {
-                    replicates.push(("delmvreg", vec![
-                        Message::BulkString(key_name.into()),
-                        Message::Integer(nodeid as i64),
-                    ]));
+                    replicates.push((
+                        "delmvreg",
+                        vec![
+                            Message::BulkString(key_name.into()),
+                            Message::Integer(nodeid as i64),
+                        ],
+                    ));
                     deleted = if r.del(nodeid, uuid) { 1 } else { 0 };
                     v.update_time = max(v.update_time, uuid);
                 }

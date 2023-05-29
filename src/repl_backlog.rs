@@ -1,5 +1,6 @@
 use crate::resp::Message;
 use crate::server::{new_events_chann, EventsConsumer, EventsProducer};
+use log::*;
 use std::collections::VecDeque;
 
 #[derive(Debug)]

@@ -6,7 +6,7 @@ keywords = ["redis", "CRDT", "CRDB", "replication", "cache"]
 authors = ["tancehao(tancehao93@163.com)"]
 license-file = "LICENSE"
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 
 [[bin]]
 name = "constdb-server"

@@ -1,20 +1,23 @@
+use crate::client::Client;
 use crate::cmd::NextArg;
 use crate::conf::{CONF_PATH, GLOBAL_CONF};
 use crate::link::{Link, LinkType, SharedLink};
-use crate::client::Client;
+use crate::replica::replica::ReplicaMeta;
 use crate::resp::Message;
 use crate::server::Server;
 use crate::CstError;
+use async_trait::async_trait;
+use lazy_static::lazy_static;
+use log::*;
 use spin::RwLock;
 use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use sysinfo::{ProcessExt, SystemExt};
-use tokio::time::sleep;
-use tokio::signal::unix::SignalKind;
 use tokio::io::AsyncWriteExt;
-use crate::replica::replica::ReplicaMeta;
+use tokio::signal::unix::SignalKind;
+use tokio::time::sleep;
 
 lazy_static! {
     static ref GLOBAL_METRICS: RwLock<Metrics> = RwLock::new(Metrics::default());
@@ -344,8 +347,10 @@ impl Display for Replication {
             self.repl_backlog_hislen
         ))?;
         for m in &self.replica_metas {
-            f.write_fmt(format_args!("replica: id={}, alias={}, addr={}, status={}, uuid_he_sent={}, uuid_he_acked={}\n",
-                                     m.he.id, m.he.alias, m.he.addr, m.status, m.uuid_he_sent, m.uuid_he_acked))?;
+            f.write_fmt(format_args!(
+                "replica: id={}, alias={}, addr={}, status={}, uuid_he_sent={}, uuid_he_acked={}\n",
+                m.he.id, m.he.alias, m.he.addr, m.status, m.uuid_he_sent, m.uuid_he_acked
+            ))?;
         }
         Ok(())
     }
@@ -356,7 +361,6 @@ impl Replication {
         self.replica_metas = metas;
     }
 }
-
 
 #[derive(Default, Debug, Clone)]
 pub struct CPU {
@@ -449,7 +453,10 @@ pub async fn pprof() {
     let mut sigs = match tokio::signal::unix::signal(SignalKind::user_defined1()) {
         Ok(s) => s,
         Err(e) => {
-            error!("Unable to start to accept USER_DEFINED1 signals for {:?}", e);
+            error!(
+                "Unable to start to accept USER_DEFINED1 signals for {:?}",
+                e
+            );
             return;
         }
     };

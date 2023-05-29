@@ -3,11 +3,11 @@ use std::io::Write;
 
 use crate::crdt::list::List;
 use crate::crdt::lwwhash::{Dict, Set};
+use crate::crdt::vclock::{Counter, MultiVersionVal};
 use crate::resp::Message;
 use crate::snapshot::{SnapshotLoader, SnapshotWriter};
 use crate::{Bytes, CstError};
 use tokio::io::AsyncRead;
-use crate::crdt::vclock::{MultiVersionVal, Counter};
 
 #[derive(Debug, Clone)]
 pub struct Object {

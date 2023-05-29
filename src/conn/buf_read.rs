@@ -2,6 +2,7 @@ use crate::lib::utils::bytes2i64;
 use crate::resp::Message;
 use crate::stats::add_network_input_bytes;
 use crate::CstError;
+use log::*;
 use std::cmp::min;
 use tokio::io;
 

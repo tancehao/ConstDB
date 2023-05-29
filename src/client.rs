@@ -1,14 +1,15 @@
-use crate::conn::Conn;
-use std::collections::LinkedList;
 use crate::cmd::{Cmd, NextArg};
-use crate::server::{EventsConsumer, Server};
-use std::thread::ThreadId;
-use crate::stats::decr_clients;
-use crate::link::{Link, LinkType};
-use crate::{CstError, now_mil};
-use crate::resp::Message;
-use tokio::net::TcpStream;
 use crate::conf::GLOBAL_CONF;
+use crate::conn::Conn;
+use crate::link::{Link, LinkType};
+use crate::resp::Message;
+use crate::server::{EventsConsumer, Server};
+use crate::stats::decr_clients;
+use crate::{now_mil, CstError};
+use async_trait::async_trait;
+use std::collections::LinkedList;
+use std::thread::ThreadId;
+use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tokio::time::Duration;
 
@@ -107,7 +108,7 @@ impl Client {
                     };
                 }
             }
-            return Ok(())
+            return Ok(());
         }
         let (readable, writable) = self.conn.net_ready().await?;
         if readable {
@@ -137,7 +138,7 @@ impl Client {
             }
             _ => Err(CstError::InvalidRequestMsg(
                 format!("The resp message should be an array").into(),
-            ))
+            )),
         }
     }
 
@@ -180,7 +181,6 @@ impl Client {
     }
 }
 
-
 pub fn client_command(
     _server: &mut Server,
     client: Option<&mut Client>,
@@ -194,10 +194,14 @@ pub fn client_command(
         "threadid" => {
             let tid = client.unwrap().thread_id;
             Ok(Message::BulkString(format!("{:?}", tid).into()))
-        },
-        "last_write_uuid" => {
-            Ok(Message::Integer(client.unwrap().last_write_uuid.map(|x| x as i64).unwrap_or(-1)))
         }
+        "last_write_uuid" => Ok(Message::Integer(
+            client
+                .unwrap()
+                .last_write_uuid
+                .map(|x| x as i64)
+                .unwrap_or(-1),
+        )),
         others => Err(CstError::UnknownSubCmd("CLIENT", others.to_string())),
     }
 }
@@ -224,7 +228,9 @@ pub fn wait_command(
     }
     let client = client.unwrap();
     match client.last_write_uuid {
-        None => Err(CstError::InvalidRequestMsg("No previous write command for waiting".into())),
+        None => Err(CstError::InvalidRequestMsg(
+            "No previous write command for waiting".into(),
+        )),
         Some(uuid) => {
             let mut addrs = vec![];
             let mut total = 0;
@@ -238,7 +244,12 @@ pub fn wait_command(
                 return Ok(Message::Error(format!("Quorum is too big! You want acks from {} replicas but we have only {} replicas", quorum, total).into()));
             }
             if addrs.len() as u64 <= quorum {
-                client.wait = Some((quorum, timeout, uuid, server.new_replica_acked_event_watcher()));
+                client.wait = Some((
+                    quorum,
+                    timeout,
+                    uuid,
+                    server.new_replica_acked_event_watcher(),
+                ));
                 Ok(Message::None)
             } else {
                 server.repl_backlog.replicate_cmd(uuid, "replurge", vec![]);

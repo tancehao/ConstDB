@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+use log::{debug, error};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -41,7 +43,6 @@ pub struct Server {
     pub db: DB,
 
     pub replicas: ReplicaManager,
-    // replicas: LWWHash<u64, ReplicaIdentity>,
     pub repl_backlog: ReplBacklog,
 
     // latest time a snapshot was dumped, and the replica ids and their uuids we received at that time
@@ -88,7 +89,7 @@ impl Server {
         self.replicate_acked_events.0.new_consumer()
     }
 
-    pub async fn run(server: Rc<RefCell<Self>>, ) -> Result<(), std::io::Error> {
+    pub async fn run(server: Rc<RefCell<Self>>) -> Result<(), std::io::Error> {
         let server_cc = server.clone();
         spawn_local(async move {
             Self::cron(server_cc).await;
@@ -246,9 +247,9 @@ mod test {
     use tokio::macros::support::thread_rng_n;
 
     use crate::conf::Config;
+    use crate::now_mil;
     use crate::resp::Message;
     use crate::server::Server;
-    use crate::now_mil;
 
     static Conf: Config = Config {
         daemon: false,
@@ -319,9 +320,7 @@ impl<T: Event> EventsProducer<T> {
 
 impl<T: Event> EventsConsumer<T> {
     pub fn new(rx: tokio::sync::watch::Receiver<T>) -> Self {
-        Self {
-            events: rx,
-        }
+        Self { events: rx }
     }
 
     pub async fn occured(&mut self, current: &T) {

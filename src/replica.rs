@@ -4,9 +4,9 @@ pub mod replica;
 
 use std::net::SocketAddr;
 
+use crate::client::Client;
 use crate::cmd::NextArg;
 use crate::link::{Link, SharedLink};
-use crate::client::Client;
 use crate::replica::replica::{Replica, ReplicaStat};
 use crate::resp::Message;
 use crate::server::Server;

@@ -1,11 +1,11 @@
-use crate::resp::{Message, new_msg_ok};
-use crate::server::Server;
-use crate::CstError;
 use crate::client::Client;
 use crate::cmd::NextArg;
-use crate::object::{Encoding, Object};
-use std::cmp::max;
 use crate::crdt::vclock::MultiVersionVal;
+use crate::object::{Encoding, Object};
+use crate::resp::{new_msg_ok, Message};
+use crate::server::Server;
+use crate::CstError;
+use std::cmp::max;
 
 pub fn mvget_command(
     server: &mut Server,
@@ -26,10 +26,17 @@ pub fn mvget_command(
                 return Ok(Message::Nil);
             }
             let v = o.enc.as_mvreg()?;
-            Ok(Message::Array(v.get_values().into_iter().map(|(node_id, value)| Message::Array(vec![
-                Message::Integer(node_id as i64),
-                Message::BulkString(value),
-            ])).collect()))
+            Ok(Message::Array(
+                v.get_values()
+                    .into_iter()
+                    .map(|(node_id, value)| {
+                        Message::Array(vec![
+                            Message::Integer(node_id as i64),
+                            Message::BulkString(value),
+                        ])
+                    })
+                    .collect(),
+            ))
         }
         None => Ok(Message::Nil),
     }
@@ -68,10 +75,14 @@ pub fn mvset_command(
     if hard {
         for (node_id, _) in v.get_values() {
             if v.del(node_id, uuid) {
-                server.repl_backlog.replicate_cmd(uuid, "delmvreg", vec![
-                    Message::BulkString(key_name.as_bytes().into()),
-                    Message::Integer(nodeid as i64),
-                ]);
+                server.repl_backlog.replicate_cmd(
+                    uuid,
+                    "delmvreg",
+                    vec![
+                        Message::BulkString(key_name.as_bytes().into()),
+                        Message::Integer(nodeid as i64),
+                    ],
+                );
             }
         }
     }

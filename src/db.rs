@@ -1,9 +1,12 @@
 use std::collections::{HashMap, LinkedList};
 use std::io::Write;
 
-use crate::{Bytes, CstError};
 use crate::object::{Encoding, Object};
-use crate::snapshot::{SNAPSHOT_FLAG_DATAS, SNAPSHOT_FLAG_DELETES, SNAPSHOT_FLAG_EXPIRES, SnapshotWriter};
+use crate::snapshot::{
+    SnapshotWriter, SNAPSHOT_FLAG_DATAS, SNAPSHOT_FLAG_DELETES, SNAPSHOT_FLAG_EXPIRES,
+};
+use crate::{Bytes, CstError};
+use log::*;
 
 const DB_INITIAL_SIZE: usize = 8096;
 
@@ -16,7 +19,7 @@ pub struct DB {
 
 impl DB {
     pub fn empty() -> Self {
-        Self{
+        Self {
             data: HashMap::with_capacity(DB_INITIAL_SIZE),
             expires: HashMap::new(),
             deletes: HashMap::new(),
@@ -32,13 +35,13 @@ impl DB {
         match self.data.get_mut(&key) {
             None => {
                 self.data.insert(key, value);
-            },
+            }
             Some(o) => {
                 let en = value.enc.name();
                 if o.merge(value).is_err() {
                     error!("Failed to merge key {} because there is a type conflict!, my type={}, other type={}", key.to_string(), o.enc.name(), en);
                 }
-            },
+            }
         }
     }
 
@@ -76,7 +79,8 @@ impl DB {
     }
 
     pub fn delete_field(&mut self, key: &Bytes, field: &Bytes, t: u64) {
-        self.garbages.push_back((key.clone(), Some(field.clone()), t));
+        self.garbages
+            .push_back((key.clone(), Some(field.clone()), t));
     }
 
     pub fn gc(&mut self, tombstone: u64) {
@@ -86,13 +90,13 @@ impl DB {
             }
             match field {
                 None => match self.deletes.get(&key) {
-                    None => {},
+                    None => {}
                     Some(v) => {
                         if *v == t {
                             self.deletes.remove(&key);
                         }
                     }
-                }
+                },
                 Some(f) => {
                     if let Some(v) = self.data.get_mut(&key) {
                         match &mut v.enc {
@@ -120,17 +124,27 @@ impl DB {
 
     // FIXME
     pub fn dump<W: Write>(&self, w: &mut SnapshotWriter<W>) -> Result<(), CstError> {
-        let _ = w.write_byte(SNAPSHOT_FLAG_DATAS)?.write_integer(self.data.len() as i64)?;
+        let _ = w
+            .write_byte(SNAPSHOT_FLAG_DATAS)?
+            .write_integer(self.data.len() as i64)?;
         for (k, v) in self.data.iter() {
             w.write_entry(k.as_bytes(), v)?;
         }
-        let _ = w.write_byte(SNAPSHOT_FLAG_EXPIRES)?.write_integer(self.expires.len() as i64)?;
+        let _ = w
+            .write_byte(SNAPSHOT_FLAG_EXPIRES)?
+            .write_integer(self.expires.len() as i64)?;
         for (k, v) in self.expires.iter() {
-            w.write_integer(k.len() as i64)?.write_bytes(k.as_bytes())?.write_integer(*v as i64)?;
+            w.write_integer(k.len() as i64)?
+                .write_bytes(k.as_bytes())?
+                .write_integer(*v as i64)?;
         }
-        let _ = w.write_byte(SNAPSHOT_FLAG_DELETES)?.write_integer(self.deletes.len() as i64)?;
+        let _ = w
+            .write_byte(SNAPSHOT_FLAG_DELETES)?
+            .write_integer(self.deletes.len() as i64)?;
         for (k, v) in self.deletes.iter() {
-            w.write_integer(k.len() as i64)?.write_bytes(k.as_bytes())?.write_integer(*v as i64)?;
+            w.write_integer(k.len() as i64)?
+                .write_bytes(k.as_bytes())?
+                .write_integer(*v as i64)?;
         }
         Ok(())
     }
@@ -138,9 +152,9 @@ impl DB {
 
 #[cfg(test)]
 mod test {
-    use crate::Bytes;
     use crate::db::DB;
     use crate::object::{Encoding, Object};
+    use crate::Bytes;
 
     #[test]
     fn test_db() {

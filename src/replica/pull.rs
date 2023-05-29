@@ -10,6 +10,7 @@ use crate::resp::Message;
 use crate::server::Server;
 use crate::snapshot::{FileSnapshotLoader, SnapshotEntry, SnapshotLoader};
 use crate::CstError;
+use log::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 

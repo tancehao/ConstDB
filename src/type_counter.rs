@@ -1,10 +1,10 @@
-use crate::cmd::NextArg;
 use crate::client::Client;
+use crate::cmd::NextArg;
+use crate::crdt::vclock::Counter;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
 use crate::server::Server;
 use crate::CstError;
-use crate::crdt::vclock::Counter;
 
 pub fn delcnt_command(
     server: &mut Server,

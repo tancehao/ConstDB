@@ -2,17 +2,17 @@ use std::cmp::{max, min};
 use std::option::Option::Some;
 use tokio::macros::support::thread_rng_n;
 
+use crate::client::Client;
 use crate::cmd::NextArg;
 use crate::crdt::lwwhash::Set;
-use crate::client::Client;
 use crate::object::{Encoding, Object};
 use crate::resp::Message;
+use crate::resp::Message::Integer;
 use crate::server::Server;
 use crate::{Bytes, CstError};
-use std::collections::{HashSet, HashMap};
-use crate::resp::Message::Integer;
-use rand::{thread_rng, Rng};
 use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
+use std::collections::{HashMap, HashSet};
 
 pub fn sadd_command(
     server: &mut Server,
@@ -183,7 +183,7 @@ pub fn scard_command(
         Some(o) => {
             let s = o.enc.as_set()?;
             s.size as i64
-        },
+        }
     };
     Ok(Message::Integer(o))
 }
@@ -205,9 +205,11 @@ pub fn sinter_command(
         let a = res.entry(x.clone()).or_insert(0);
         *a += 1;
     });
-    let res = res.into_iter()
+    let res = res
+        .into_iter()
         .filter(|(_, x)| *x == keys.len())
-        .map(|(x, _)| Message::BulkString(x)).collect();
+        .map(|(x, _)| Message::BulkString(x))
+        .collect();
     Ok(Message::Array(res))
 }
 
@@ -230,9 +232,11 @@ pub fn sinterstore_command(
         let a = res.entry(x.clone()).or_insert(0);
         *a += 1;
     });
-    let res: Vec<Bytes> = res.into_iter()
+    let res: Vec<Bytes> = res
+        .into_iter()
         .filter(|(_, x)| *x == keys.len())
-        .map(|(x, _)| x).collect();
+        .map(|(x, _)| x)
+        .collect();
 
     let o = match server.db.query(&dst_key, uuid) {
         Some(v) => v,
@@ -268,29 +272,30 @@ pub fn sintercard_command(
         let a = res.entry(x.clone()).or_insert(0);
         *a += 1;
     });
-    let cnt = res.into_iter()
+    let cnt = res
+        .into_iter()
         .filter(|(_, x)| *x == keys.len())
-        .map(|(x, _)| x).count();
+        .map(|(x, _)| x)
+        .count();
     Ok(Message::Integer(cnt as i64))
 }
 
 fn scan_multi_set<F>(server: &mut Server, keys: &[Bytes], uuid: u64, mut f: F)
-    where F: FnMut(usize, &Bytes) -> ()
+where
+    F: FnMut(usize, &Bytes) -> (),
 {
     let mut i = 0;
     for k in keys {
         match server.db.query(&k, uuid) {
-            None => {},
-            Some(o) => {
-                match o.enc.as_set() {
-                    Err(_) => continue,
-                    Ok(s) => {
-                        for (k, _) in s.iter() {
-                            f(i, k);
-                        }
+            None => {}
+            Some(o) => match o.enc.as_set() {
+                Err(_) => continue,
+                Ok(s) => {
+                    for (k, _) in s.iter() {
+                        f(i, k);
                     }
                 }
-            }
+            },
         }
         i += 1;
     }
@@ -318,7 +323,8 @@ pub fn sdiff_command(
         }
     });
     let members = res_first
-        .difference(&res).into_iter()
+        .difference(&res)
+        .into_iter()
         .map(|x| Message::BulkString(x.clone()))
         .collect();
     Ok(Message::Array(members))
@@ -400,7 +406,8 @@ pub fn smismember_command(
         None => vec![],
         Some(o) => {
             let s = o.enc.as_set()?;
-            members.into_iter()
+            members
+                .into_iter()
                 .map(|x| s.get(&x).map(|_x| 1).unwrap_or_default())
                 .map(|x| Message::Integer(x))
                 .collect()
@@ -425,7 +432,7 @@ pub fn smove_command(
             None => return Ok(Integer(0)),
             Some(o) => {
                 let _ = o.enc.as_set()?;
-            },
+            }
         }
     }
 
@@ -480,13 +487,18 @@ pub fn srandmember_command(
                     members.push(v);
                 }
 
-                Message::Array(members.into_iter().map(|x| Message::BulkString(x.clone())).collect())
+                Message::Array(
+                    members
+                        .into_iter()
+                        .map(|x| Message::BulkString(x.clone()))
+                        .collect(),
+                )
             } else {
                 let n = thread_rng().gen::<usize>() % (s.size as usize);
                 let field = s.iter().skip(n).map(|(x, _)| x.clone()).next().unwrap();
                 Message::BulkString(field)
             }
-        },
+        }
     };
 
     Ok(res)
@@ -508,8 +520,7 @@ pub fn sunion_command(
     scan_multi_set(server, &keys, uuid, |_, x| {
         res.insert(x.clone());
     });
-    let res = res.into_iter()
-        .map(|x| Message::BulkString(x)).collect();
+    let res = res.into_iter().map(|x| Message::BulkString(x)).collect();
     Ok(Message::Array(res))
 }
 

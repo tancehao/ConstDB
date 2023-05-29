@@ -1,11 +1,11 @@
-use crate::{Bytes, CstError};
 use crate::resp::Message;
-use std::fmt::Debug;
-use std::cmp::min;
 use crate::snapshot::{SnapshotLoader, SnapshotWriter};
-use tokio::io::AsyncRead;
-use std::io::Write;
+use crate::{Bytes, CstError};
+use std::cmp::min;
+use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::io::Write;
+use tokio::io::AsyncRead;
 
 type VClock<T> = MiniMap<T>;
 
@@ -22,16 +22,14 @@ impl<T: Debug> Debug for MiniMap<T> {
 
 impl<T> Default for MiniMap<T> {
     fn default() -> Self {
-        MiniMap {
-            values: vec![],
-        }
+        MiniMap { values: vec![] }
     }
 }
 
 impl<T: Clone> Clone for MiniMap<T> {
     fn clone(&self) -> Self {
-        Self{
-            values: self.values.clone()
+        Self {
+            values: self.values.clone(),
         }
     }
 }
@@ -114,12 +112,12 @@ impl Counter {
     }
 
     pub fn change(&mut self, actor: u64, value: i64, uuid: u64) -> i64 {
-        match self.get_mut(&(actor+1)) {
+        match self.get_mut(&(actor + 1)) {
             Some(v) => {
                 v.0 += value;
                 v.1 = uuid;
             }
-            None => self.set(actor+1, value, uuid),
+            None => self.set(actor + 1, value, uuid),
         }
         let sum = self.get_mut(&0).unwrap();
         sum.0 += value;
@@ -137,7 +135,9 @@ impl Counter {
         Ok(())
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(loader: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        loader: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
         let size = loader.read_integer().await? as usize;
         let mut values = Vec::with_capacity(size);
         for _ in 0..size {
@@ -146,29 +146,33 @@ impl Counter {
             let uuid = loader.read_u64().await? as u64;
             values.push((node_id, (cnt, uuid)));
         }
-        Ok(Self{values})
+        Ok(Self { values })
     }
 
     pub fn describe(&self) -> Message {
-        Message::Array(self
-            .values
-            .iter()
-            .map(|(k, (c, t))| {
-                Message::Array(vec![
-                    Message::Integer(*k as i64),
-                    Message::Integer(*c),
-                    Message::Integer(*t as i64),
-                ])
-            })
-            .collect())
+        Message::Array(
+            self.values
+                .iter()
+                .map(|(k, (c, t))| {
+                    Message::Array(vec![
+                        Message::Integer(*k as i64),
+                        Message::Integer(*c),
+                        Message::Integer(*t as i64),
+                    ])
+                })
+                .collect(),
+        )
     }
 }
 
 pub type MultiVersionVal = VClock<Bytes>;
 
-impl MultiVersionVal{
+impl MultiVersionVal {
     pub fn get_values(&self) -> Vec<(u64, Bytes)> {
-        self.values.iter().map(|(n, (d, _))| (*n, d.clone())).collect()
+        self.values
+            .iter()
+            .map(|(n, (d, _))| (*n, d.clone()))
+            .collect()
     }
 
     pub fn hard_set(&mut self, node_id: u64, value: Bytes, uuid: u64) {
@@ -179,9 +183,10 @@ impl MultiVersionVal{
         let len_before = self.values.len();
         let mut values = vec![];
         std::mem::swap(&mut self.values, &mut values);
-        self.values = values.into_iter().filter(|(x, v)| {
-            *x != node_id || v.1 >= uuid
-        }).collect();
+        self.values = values
+            .into_iter()
+            .filter(|(x, v)| *x != node_id || v.1 >= uuid)
+            .collect();
         let len_after = self.values.len();
         len_before < len_after
     }
@@ -197,7 +202,9 @@ impl MultiVersionVal{
         Ok(())
     }
 
-    pub async fn load_snapshot<T: AsyncRead + Unpin>(loader: &mut SnapshotLoader<T>) -> Result<Self, CstError> {
+    pub async fn load_snapshot<T: AsyncRead + Unpin>(
+        loader: &mut SnapshotLoader<T>,
+    ) -> Result<Self, CstError> {
         let size = loader.read_integer().await? as usize;
         let mut values = Vec::with_capacity(size);
         for _ in 0..size {
@@ -207,20 +214,21 @@ impl MultiVersionVal{
             let uuid = loader.read_u64().await? as u64;
             values.push((node_id, (data, uuid)));
         }
-        Ok(Self{values})
+        Ok(Self { values })
     }
 
     pub fn describe(&self) -> Message {
-        Message::Array(self
-            .values
-            .iter()
-            .map(|(k, (d, t))| {
-                Message::Array(vec![
-                    Message::Integer(*k as i64),
-                    Message::BulkString(d.clone()),
-                    Message::Integer(*t as i64),
-                ])
-            })
-            .collect())
+        Message::Array(
+            self.values
+                .iter()
+                .map(|(k, (d, t))| {
+                    Message::Array(vec![
+                        Message::Integer(*k as i64),
+                        Message::BulkString(d.clone()),
+                        Message::Integer(*t as i64),
+                    ])
+                })
+                .collect(),
+        )
     }
 }

@@ -3,14 +3,15 @@ use crate::conn::writer::Writer;
 use crate::replica::replica::ReplicaMeta;
 use crate::resp::Message;
 use crate::server::{EventsConsumer, Server};
-use crate::{now_secs, CstError, now_mil};
+use crate::{now_mil, now_secs, CstError};
+use log::*;
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::time::sleep;
 use tokio::time::Duration;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Pusher {
@@ -147,9 +148,14 @@ impl Pusher {
                 );
                 let now = now_secs();
                 let urged = self.urged.swap(false, Ordering::Relaxed);
-                if urged || self.latest_ack_time + (GLOBAL_CONF.replica_heartbeat_frequency as u64) < now {
-                    self.writer
-                        .write_msg(mkcmd!("REPLACK", uuid_he_sent, server.next_uuid(now_mil(), false)));
+                if urged
+                    || self.latest_ack_time + (GLOBAL_CONF.replica_heartbeat_frequency as u64) < now
+                {
+                    self.writer.write_msg(mkcmd!(
+                        "REPLACK",
+                        uuid_he_sent,
+                        server.next_uuid(now_mil(), false)
+                    ));
                     self.latest_ack_time = now;
                 }
             }

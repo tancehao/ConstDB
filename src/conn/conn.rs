@@ -2,6 +2,7 @@ use crate::conn::reader::Reader;
 use crate::conn::writer::Writer;
 use crate::resp::Message;
 use crate::CstError;
+use log::*;
 use tokio::fs::File;
 use tokio::net::TcpStream;
 
